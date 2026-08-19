@@ -1,0 +1,42 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+    function owned() {
+      return signedIn() && resource.data.producerId == request.auth.uid;
+    }
+    function ownedOnCreate() {
+      return signedIn() && request.resource.data.producerId == request.auth.uid;
+    }
+
+    match /producers/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+    match /clients/{id} {
+      allow read, update, delete: if owned();
+      allow create: if ownedOnCreate();
+    }
+    match /policies/{id} {
+      allow read, update, delete: if owned();
+      allow create: if ownedOnCreate();
+    }
+    match /claims/{id} {
+      allow read, update, delete: if owned();
+      allow create: if ownedOnCreate();
+    }
+    match /documents/{id} {
+      allow read, update, delete: if owned();
+      allow create: if ownedOnCreate();
+    }
+    match /commissions/{id} {
+      allow read, update, delete: if owned();
+      allow create: if ownedOnCreate();
+    }
+    match /conversations/{id} {
+      allow read, update, delete: if owned();
+      allow create: if ownedOnCreate();
+    }
+  }
+}

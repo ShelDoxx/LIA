@@ -1,0 +1,78 @@
+import { lazy, Suspense, type ReactNode } from "react";
+import { Navigate, Route, Routes } from "react-router-dom";
+import { useLia } from "./context/LiaContext";
+import { Layout } from "./components/Layout";
+import { Login } from "./pages/Login";
+import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
+
+const Dashboard = lazy(() => import("./pages/Dashboard").then((m) => ({ default: m.Dashboard })));
+const Clients = lazy(() => import("./pages/Clients").then((m) => ({ default: m.Clients })));
+const ClientProfile = lazy(() => import("./pages/ClientProfile").then((m) => ({ default: m.ClientProfile })));
+const Policies = lazy(() => import("./pages/Policies").then((m) => ({ default: m.Policies })));
+const Renewals = lazy(() => import("./pages/Renewals").then((m) => ({ default: m.Renewals })));
+const Commissions = lazy(() => import("./pages/Commissions").then((m) => ({ default: m.Commissions })));
+const WhatsApp = lazy(() => import("./pages/WhatsApp").then((m) => ({ default: m.WhatsApp })));
+const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
+const RadarPage = lazy(() => import("./pages/Radar").then((m) => ({ default: m.RadarPage })));
+const Emergencias = lazy(() => import("./pages/Emergencias").then((m) => ({ default: m.Emergencias })));
+const Quotes = lazy(() => import("./pages/Quotes").then((m) => ({ default: m.Quotes })));
+const Cobranzas = lazy(() => import("./pages/Cobranzas").then((m) => ({ default: m.Cobranzas })));
+const PdfPack = lazy(() => import("./pages/PdfPack").then((m) => ({ default: m.PdfPack })));
+const Siniestros = lazy(() => import("./pages/Siniestros").then((m) => ({ default: m.Siniestros })));
+const PublicDoc = lazy(() => import("./pages/PublicDoc").then((m) => ({ default: m.PublicDoc })));
+
+function PageLoader() {
+  return (
+    <div className="grid min-h-[40vh] place-items-center">
+      <p className="font-serif text-xl text-ink-soft">Cargando…</p>
+    </div>
+  );
+}
+
+function Lazy({ children }: { children: ReactNode }) {
+  return (
+    <RouteErrorBoundary>
+      <Suspense fallback={<PageLoader />}>{children}</Suspense>
+    </RouteErrorBoundary>
+  );
+}
+
+function Guard({ children }: { children: React.ReactNode }) {
+  const { signedIn } = useLia();
+  if (!signedIn) return <Navigate to="/entrar" replace />;
+  return children;
+}
+
+export default function App() {
+  const { signedIn } = useLia();
+  return (
+    <Routes>
+      <Route path="/entrar" element={signedIn ? <Navigate to="/" replace /> : <Login />} />
+      <Route path="/c/:policyId/:kind" element={<Lazy><PublicDoc /></Lazy>} />
+      <Route
+        path="/"
+        element={
+          <Guard>
+            <Layout />
+          </Guard>
+        }
+      >
+        <Route index element={<Lazy><Dashboard /></Lazy>} />
+        <Route path="clientes" element={<Lazy><Clients /></Lazy>} />
+        <Route path="clientes/:id" element={<Lazy><ClientProfile /></Lazy>} />
+        <Route path="polizas" element={<Lazy><Policies /></Lazy>} />
+        <Route path="vencimientos" element={<Lazy><Renewals /></Lazy>} />
+        <Route path="comisiones" element={<Lazy><Commissions /></Lazy>} />
+        <Route path="whatsapp" element={<Lazy><WhatsApp /></Lazy>} />
+        <Route path="radar" element={<Lazy><RadarPage /></Lazy>} />
+        <Route path="cotizar" element={<Lazy><Quotes /></Lazy>} />
+        <Route path="siniestros" element={<Lazy><Siniestros /></Lazy>} />
+        <Route path="cobranzas" element={<Lazy><Cobranzas /></Lazy>} />
+        <Route path="emergencias" element={<Lazy><Emergencias /></Lazy>} />
+        <Route path="ajustes" element={<Lazy><Settings /></Lazy>} />
+        <Route path="expediente" element={<Lazy><PdfPack /></Lazy>} />
+      </Route>
+      <Route path="*" element={<Navigate to={signedIn ? "/" : "/entrar"} replace />} />
+    </Routes>
+  );
+}

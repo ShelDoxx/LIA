@@ -1,0 +1,21 @@
+import { randomBytes } from "node:crypto";
+
+export const config = {
+  port: Number(process.env.PORT ?? 8787),
+  token: process.env.WHATSAPP_TOKEN ?? "",
+  phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID ?? "",
+  verifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "lia-verify",
+  /** Secreto de la app Meta (App Settings → Basic). Necesario para validar webhook. */
+  appSecret: process.env.META_APP_SECRET ?? "",
+  /**
+   * Secreto compartido para las rutas internas (web → bot).
+   * Si no está en env se genera uno nuevo por cada arranque.
+   * Para persistirlo: exportar LIA_BOT_SECRET y usarlo en vite.config.ts como VITE_BOT_SECRET.
+   */
+  liaSecret: process.env.LIA_BOT_SECRET ?? randomBytes(20).toString("hex"),
+  graphVersion: "v21.0",
+};
+
+export function isConfigured() {
+  return Boolean(config.token && config.phoneNumberId);
+}

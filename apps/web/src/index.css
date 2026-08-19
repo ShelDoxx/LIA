@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Fraunces", ui-serif, Georgia, serif;
+  --color-ink: #12141c;
+  --color-ink-soft: #5b5852;
+  --color-paper: #f7f3ec;
+  --color-paper-2: #efe8dc;
+  --color-line: #dfd4c4;
+  --color-forest: #1a2744;
+  --color-forest-deep: #0d1424;
+  --color-moss: #0f7a6b;
+  --color-gold: #c4452d;
+  --color-gold-deep: #9a321f;
+  --color-warn: #c2781a;
+  --color-danger: #b42318;
+  --color-wa: #128c7e;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+#root {
+  isolation: isolate;
+}
+
+.lia-grain {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.07'/%3E%3C/svg%3E");
+}
+
+.lia-paper-rule {
+  background-image: linear-gradient(to bottom, transparent 31px, rgba(18, 20, 28, 0.06) 32px);
+  background-size: 100% 32px;
+}
+
+@keyframes liaWaMsgIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.lia-wa-msg-in {
+  opacity: 0;
+  animation: liaWaMsgIn 700ms ease forwards;
+}
+
+.lia-wa-msg-1 {
+  animation-delay: 150ms;
+}
+
+.lia-wa-msg-2 {
+  animation-delay: 600ms;
+}
+
+.lia-wa-msg-3 {
+  animation-delay: 1050ms;
+}
+
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+::selection {
+  background: #c4452d;
+  color: #f7f3ec;
+}
