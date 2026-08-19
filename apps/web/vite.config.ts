@@ -55,9 +55,8 @@ export default defineConfig({
           if (id.includes("firebase")) return "firebase";
           if (id.includes("heic2any")) return "heic";
           if (id.includes("date-fns")) return "date-fns";
-          if (id.includes("react-router")) return "router";
-          if (id.includes("react-dom") || id.includes("/react/")) return "react";
-          return "vendor";
+          // React + react-router must stay in the same graph as UI libs — splitting
+          // them into separate chunks causes "forwardRef of undefined" at runtime.
         },
       },
     },
