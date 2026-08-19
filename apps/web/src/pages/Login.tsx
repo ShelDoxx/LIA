@@ -410,12 +410,8 @@ export function Login() {
 
 function WaPhone() {
   return (
-    <div className="mx-auto flex w-full max-w-md items-start justify-center gap-3 lg:max-w-lg lg:gap-4">
-      <div className="hidden shrink-0 rounded-2xl border border-line bg-paper p-3 lg:block lg:w-32 xl:w-36">
-        <p className="font-serif text-xl text-forest xl:text-2xl">4 fotos</p>
-        <p className="mt-1 text-[11px] leading-snug text-ink-soft">Un PDF. Alta lista en la ficha.</p>
-      </div>
-      <div className="min-w-0 flex-1 rounded-[2.2rem] border border-forest/15 bg-forest-deep p-3">
+    <div className="mx-auto w-full max-w-sm">
+      <div className="rounded-[2.2rem] border border-forest/15 bg-forest-deep p-3 shadow-lg shadow-forest/10">
         <div className="rounded-[1.7rem] bg-[#efeae2] px-3 py-4">
           <p className="mb-3 text-center text-[10px] text-ink-soft">WhatsApp · Lía de tu estudio</p>
           <div className="lia-wa-msg-in lia-wa-msg-1 max-w-[85%] rounded-2xl rounded-tl-sm bg-white px-3 py-2 text-xs text-ink">
