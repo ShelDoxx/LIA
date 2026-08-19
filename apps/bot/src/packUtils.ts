@@ -1,4 +1,13 @@
-export { PHOTO_SLOTS, isPackClose, slotLabel } from "@lia/nlu";
+export {
+  PHOTO_SLOTS,
+  PROSPECT_PHOTO_SLOTS,
+  isPackClose,
+  slotLabel,
+  prospectSlotLabel,
+  slotLabelForMode,
+  packTargetCount,
+  type PackMode,
+} from "@lia/nlu";
 
 export type PackPhoto = {
   label: string;
@@ -10,6 +19,7 @@ export type PackPhoto = {
 export type PhonePack = {
   phone: string;
   photos: PackPhoto[];
+  mode: import("@lia/nlu").PackMode;
   updatedAt: number;
 };
 
@@ -20,11 +30,11 @@ function key(phone: string) {
   return d.length >= 10 ? d.slice(-10) : d;
 }
 
-export function getPack(phone: string): PhonePack {
+export function getPack(phone: string, defaultMode: import("@lia/nlu").PackMode = "prospect"): PhonePack {
   const k = key(phone);
   const existing = packs.get(k);
   if (existing) return existing;
-  const pack: PhonePack = { phone: k, photos: [], updatedAt: Date.now() };
+  const pack: PhonePack = { phone: k, photos: [], mode: defaultMode, updatedAt: Date.now() };
   packs.set(k, pack);
   return pack;
 }

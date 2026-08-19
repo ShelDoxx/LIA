@@ -6,7 +6,7 @@ export {
   type IdentityCue,
   type IdentityRecord,
 } from "./identity";
-export { PHOTO_SLOTS, asksForPack, isPackClose, slotLabel } from "./pack";
+export { PHOTO_SLOTS, PROSPECT_PHOTO_SLOTS, asksForPack, isPackClose, slotLabel, prospectSlotLabel, slotLabelForMode, packTargetCount, type PackMode } from "./pack";
 export {
   ALL_RAMOS,
   ASSISTANCE_LINES,

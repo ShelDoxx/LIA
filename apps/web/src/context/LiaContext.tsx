@@ -25,9 +25,11 @@ import type {
 import {
   asksForPack,
   assembleClientPdf,
+  clientPackMode,
   filesToPackPhotos,
   isPackClose,
   packInstructions,
+  packTargetCount,
   packedReply,
   receivedAck,
   type PackPhoto,
@@ -388,6 +390,7 @@ export function LiaProvider({ children }: { children: ReactNode }) {
   async function finishPack(current: LiaState, conv: Conversation, photos: PackPhoto[]) {
     const client = current.clients.find((c) => c.id === conv.clientId);
     if (!client || photos.length === 0) return current;
+    const mode = clientPackMode(client);
     const { doc, filename } = await assembleClientPdf({
       producer: current.producer,
       client,
@@ -397,7 +400,7 @@ export function LiaProvider({ children }: { children: ReactNode }) {
     const reply: ChatMessage = {
       id: crypto.randomUUID(),
       from: "lia",
-      text: packedReply(client.firstName, filename, photos.length),
+      text: packedReply(client.firstName, filename, photos.length, mode),
       at: new Date().toISOString(),
       kind: "expediente",
       docId: doc.id,
@@ -783,10 +786,11 @@ export function LiaProvider({ children }: { children: ReactNode }) {
         }
 
         if (isPackClose(userText) && pending.length === 0) {
+          const mode = clientPackMode(client);
           const reply: ChatMessage = {
             id: crypto.randomUUID(),
             from: "lia",
-            text: packInstructions(client?.firstName ?? ""),
+            text: packInstructions(client?.firstName ?? "", mode),
             at: new Date(Date.now() + 400).toISOString(),
           };
           void persist({
@@ -799,10 +803,11 @@ export function LiaProvider({ children }: { children: ReactNode }) {
         }
 
         if (asksForPack(userText)) {
+          const mode = clientPackMode(client);
           const reply: ChatMessage = {
             id: crypto.randomUUID(),
             from: "lia",
-            text: packInstructions(client?.firstName ?? ""),
+            text: packInstructions(client?.firstName ?? "", mode),
             at: new Date(Date.now() + 400).toISOString(),
           };
           void persist({
@@ -860,7 +865,7 @@ export function LiaProvider({ children }: { children: ReactNode }) {
         const liaMsg: ChatMessage = {
           id: crypto.randomUUID(),
           from: "lia",
-          text: packInstructions(client.firstName),
+          text: packInstructions(client.firstName, clientPackMode(client)),
           at: new Date().toISOString(),
         };
         const existing = current.conversations.find((c) => c.clientId === clientId);
@@ -894,8 +899,10 @@ export function LiaProvider({ children }: { children: ReactNode }) {
         const current = currentOf();
         const conv = current.conversations.find((c) => c.id === conversationId);
         if (!conv) return;
+        const client = current.clients.find((c) => c.id === conv.clientId);
+        const mode = clientPackMode(client);
         const pending = conv.pendingPhotos ?? [];
-        const photos = await filesToPackPhotos(files, pending.length);
+        const photos = await filesToPackPhotos(files, pending.length, mode);
         const now = Date.now();
         const imgMsgs: ChatMessage[] = photos.map((p, i) => ({
           id: crypto.randomUUID(),
@@ -917,13 +924,13 @@ export function LiaProvider({ children }: { children: ReactNode }) {
           });
           return;
         }
-        const auto = nextPending.length >= 4;
+        const auto = nextPending.length >= packTargetCount(mode);
         const ack: ChatMessage = {
           id: crypto.randomUUID(),
           from: "lia",
           text: auto
-            ? receivedAck(nextPending.length)
-            : receivedAck(nextPending.length) +
+            ? receivedAck(nextPending.length, mode)
+            : receivedAck(nextPending.length, mode) +
               (clientHint(current, conv.clientId)
                 ? `\nQueda en la ficha de ${clientHint(current, conv.clientId)}.`
                 : ""),

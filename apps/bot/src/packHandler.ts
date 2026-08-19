@@ -1,12 +1,12 @@
+import { packTargetCount, slotLabelForMode, type PackMode } from "@lia/nlu";
 import { buildExpedienteFromPhotos } from "./buildPdf.js";
-import { clientByPhone } from "./contextStore.js";
-import { enqueueDoc } from "./pendingDocs.js";
+import { clientByPhone, rememberLead, studioName } from "./contextStore.js";
+import { enqueueDoc, enqueueLead } from "./pendingDocs.js";
 import {
   addPhoto,
   clearPack,
   getPack,
   isPackClose,
-  slotLabel,
   type PackPhoto,
 } from "./packUtils.js";
 import { sendDocument, sendText } from "./whatsapp.js";
@@ -15,18 +15,36 @@ function bytesToBase64(bytes: Uint8Array) {
   return Buffer.from(bytes).toString("base64");
 }
 
+function resolveMode(phone: string): PackMode {
+  const client = clientByPhone(phone);
+  return client?.verified ? "full" : "prospect";
+}
+
 export async function finishPhonePack(phone: string): Promise<boolean> {
   const pack = getPack(phone);
   if (pack.photos.length === 0) {
-    await sendText(phone, "Todavía no recibí fotos. Mandame DNI frente, dorso y tarjeta (o CBU).");
+    const mode = pack.mode;
+    await sendText(
+      phone,
+      mode === "prospect"
+        ? "Todavía no recibí fotos. Mandame DNI frente y dorso para armar tu ficha de consulta."
+        : "Todavía no recibí fotos. Mandame DNI frente, dorso y tarjeta (o CBU).",
+    );
     return false;
   }
 
+  if (pack.mode === "prospect") {
+    return finishProspectPack(phone, pack);
+  }
+  return finishAltaPack(phone, pack);
+}
+
+async function finishAltaPack(phone: string, pack: { photos: PackPhoto[] }) {
   const client = clientByPhone(phone);
   const clientLine = client
     ? `${client.firstName} · WhatsApp ${phone}`
     : `Cliente · WhatsApp ${phone}`;
-  const studio = client?.producerName ?? "Estudio Lía";
+  const studio = client?.producerName ?? studioName();
 
   const bytes = await buildExpedienteFromPhotos({
     studio,
@@ -56,24 +74,93 @@ export async function finishPhonePack(phone: string): Promise<boolean> {
   return true;
 }
 
+async function finishProspectPack(phone: string, pack: { photos: PackPhoto[] }) {
+  const studio = studioName();
+  const clientLine = `Consulta WhatsApp · ${phone}`;
+  const bytes = await buildExpedienteFromPhotos({
+    studio,
+    clientLine,
+    photos: pack.photos,
+  });
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  const filename = `Consulta_DNI_${stamp}.pdf`;
+
+  const client = clientByPhone(phone);
+  if (!client?.verified) {
+    const lead = {
+      id: crypto.randomUUID(),
+      phone: phone.replace(/\D/g, ""),
+      firstName: "Prospecto",
+      lastName: "WhatsApp",
+    };
+    enqueueLead(lead);
+    rememberLead(phone, {
+      firstName: "Prospecto",
+      lastName: "WhatsApp",
+      producerName: studio,
+      policies: [],
+      verified: false,
+    });
+  }
+
+  enqueueDoc({
+    id: crypto.randomUUID(),
+    phone: phone.replace(/\D/g, ""),
+    filename,
+    dataBase64: bytesToBase64(bytes),
+    uploadedAt: new Date().toISOString(),
+  });
+
+  await sendDocument(
+    phone,
+    bytes,
+    filename,
+    "Recibí tu DNI. Armé el expediente preliminar.",
+  );
+
+  await sendText(
+    phone,
+    `Tu consulta quedó pendiente de aprobación en ${studio}. Un productor te va a contactar para cotizar — todavía no tenés póliza emitida.\n\n¿Qué querés asegurar? (auto, vida, hogar, ART…) Si es urgente, escribí «humano».`,
+  );
+
+  clearPack(phone);
+  return true;
+}
+
+function photoAck(mode: PackMode, count: number): string {
+  const target = packTargetCount(mode);
+  if (count >= target) {
+    return mode === "prospect"
+      ? `Recibí las ${count} fotos del DNI. Armo tu ficha pendiente de aprobación.`
+      : `Recibí ${count} fotos. Armo el PDF y te lo mando por acá.`;
+  }
+  const got = slotLabelForMode(count - 1, mode);
+  const next = slotLabelForMode(count, mode);
+  if (mode === "prospect") {
+    return `Recibí ${got} (${count}/${target}). Mandame ${next}. Con eso armo tu ficha de consulta — no hace falta tarjeta todavía.`;
+  }
+  return `Recibí la foto ${count} (${got}). Mandame ${next}. Con 4 armo solo; si ya están, escribí LISTO.`;
+}
+
 export async function handleIncomingPhoto(phone: string, bytes: Uint8Array, mime: string) {
-  const before = getPack(phone).photos.length;
+  const mode = resolveMode(phone);
+  const before = getPack(phone, mode).photos.length;
   const count = addPhoto(phone, {
-    label: slotLabel(before),
+    label: slotLabelForMode(before, mode),
     bytes,
     mime,
     name: `foto-${String(before + 1).padStart(2, "0")}.jpg`,
   });
-  const ack =
-    count >= 4
-      ? `Recibí ${count} fotos. Armo el PDF y te lo mando por acá.`
-      : `Recibí la foto ${count} (${slotLabel(count - 1)}). Mandame ${slotLabel(count)}. Con 4 armo solo; si ya están, escribí LISTO.`;
+  const pack = getPack(phone);
+  const ack = photoAck(pack.mode, count);
   await sendText(phone, ack);
-  if (count >= 4) await finishPhonePack(phone);
+  if (count >= packTargetCount(pack.mode)) await finishPhonePack(phone);
 }
 
 export async function handleIncomingText(phone: string, text: string): Promise<boolean> {
-  if (isPackClose(text) && getPack(phone).photos.length > 0) {
+  const pack = getPack(phone);
+  if (isPackClose(text) && pack.photos.length > 0) {
     await finishPhonePack(phone);
     return true;
   }

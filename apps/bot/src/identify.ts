@@ -25,7 +25,8 @@ function persistSessions() {
 function askId() {
   return `Hola, soy Lía de ${studioName()}. Al seguir este chat aceptás que usemos tus datos para gestionar tu seguro (Ley 25.326).
 
-Para ayudarte, pasame tu DNI (sin puntos). Si ya sos cliente del estudio, también sirve patente o número de póliza.`;
+¿Ya sos cliente del estudio? Pasame DNI, patente o póliza.
+¿Querés cotizar? Mandame foto frente y dorso del DNI — armo tu ficha pendiente de aprobación (sin tarjeta por ahora).`;
 }
 
 export function handleIdentify(phone: string, text: string): string | null {

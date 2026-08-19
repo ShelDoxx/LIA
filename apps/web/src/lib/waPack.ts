@@ -2,9 +2,27 @@ import { buildExpedientePdf, downloadPdf, fileToJpegDataUrl } from "@/lib/buildP
 import { normalizePackFile } from "@/lib/heic";
 import type { Client, Producer, VaultDoc } from "@/lib/types";
 import { fullName } from "@/lib/format";
-import { PHOTO_SLOTS, asksForPack, isPackClose, slotLabel } from "@/lib/packNlu";
+import {
+  PHOTO_SLOTS,
+  PROSPECT_PHOTO_SLOTS,
+  asksForPack,
+  isPackClose,
+  packTargetCount,
+  slotLabel,
+  slotLabelForMode,
+  type PackMode,
+} from "@lia/nlu";
 
-export { PHOTO_SLOTS, asksForPack, isPackClose, slotLabel };
+export {
+  PHOTO_SLOTS,
+  PROSPECT_PHOTO_SLOTS,
+  asksForPack,
+  isPackClose,
+  slotLabel,
+  packTargetCount,
+  slotLabelForMode,
+  type PackMode,
+};
 
 export type PackPhoto = {
   label: string;
@@ -13,7 +31,22 @@ export type PackPhoto = {
   kind: "image" | "file";
 };
 
-export function packInstructions(firstName: string) {
+export function clientPackMode(client?: Client): PackMode {
+  if (!client) return "prospect";
+  if (client.tags.includes("whatsapp-pendiente") || client.tags.includes("whatsapp-prospecto")) {
+    return "prospect";
+  }
+  return "full";
+}
+
+export function packInstructions(firstName: string, mode: PackMode = "full") {
+  if (mode === "prospect") {
+    return `${firstName}, para cotizar mandame solo el DNI por acá (JPG o HEIC):
+1) DNI frente
+2) DNI dorso
+
+Con eso armo tu ficha pendiente de aprobación. Todavía no hace falta tarjeta ni CBU.`;
+  }
   return `${firstName}, mandame las fotos por acá, aunque sean JPG o HEIC del iPhone:
 1) DNI frente
 2) DNI dorso
@@ -23,25 +56,37 @@ export function packInstructions(firstName: string) {
 Con 4 fotos las armo solas. Si son menos, escribí LISTO y armo igual. El PDF queda en tu ficha.`;
 }
 
-export function receivedAck(count: number) {
-  const got = slotLabel(count - 1);
-  if (count >= 4) {
-    return `Recibí ${count} fotos (última: ${got}). Armo el PDF y lo dejo en tu ficha.`;
+export function receivedAck(count: number, mode: PackMode = "full") {
+  const target = packTargetCount(mode);
+  const got = slotLabelForMode(count - 1, mode);
+  if (count >= target) {
+    return mode === "prospect"
+      ? `Recibí las ${count} fotos del DNI. Armo tu ficha pendiente de aprobación.`
+      : `Recibí ${count} fotos (última: ${got}). Armo el PDF y lo dejo en tu ficha.`;
   }
-  return `Recibí la foto ${count} (${got}). Mandame ${slotLabel(count)}. Con 4 armo el PDF solo. Si ya están todas, escribí LISTO.`;
+  const next = slotLabelForMode(count, mode);
+  if (mode === "prospect") {
+    return `Recibí ${got} (${count}/${target}). Mandame ${next}. No hace falta tarjeta todavía.`;
+  }
+  return `Recibí la foto ${count} (${got}). Mandame ${next}. Con 4 armo el PDF solo. Si ya están todas, escribí LISTO.`;
 }
 
-export async function filesToPackPhotos(files: File[], startIndex: number): Promise<PackPhoto[]> {
+export async function filesToPackPhotos(
+  files: File[],
+  startIndex: number,
+  mode: PackMode = "full",
+): Promise<PackPhoto[]> {
   const normalized = await Promise.all(files.map((file) => normalizePackFile(file)));
   const out: PackPhoto[] = [];
   for (let i = 0; i < normalized.length; i++) {
     const file = normalized[i];
     const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
     const dataUrl = isPdf ? await blobToDataUrl(file) : await fileToJpegDataUrl(file);
+    const label = slotLabelForMode(startIndex + i, mode);
     out.push({
-      label: slotLabel(startIndex + i),
+      label,
       dataUrl,
-      name: file.name || `${slotLabel(startIndex + i)}.jpg`,
+      name: file.name || `${label}.jpg`,
       kind: isPdf ? "file" : "image",
     });
   }
@@ -60,17 +105,21 @@ export async function assembleClientPdf(opts: {
       file: await dataUrlToFile(p.dataUrl, p.name),
     })),
   );
+  const mode = clientPackMode(opts.client);
   const bytes = await buildExpedientePdf({
-    title: "Expediente WhatsApp",
+    title: mode === "prospect" ? "Consulta WhatsApp — DNI" : "Expediente WhatsApp",
     subtitle: "Armado automatico desde el chat",
     studio: opts.producer.studioName,
-    clientLine: `${fullName(opts.client)}  ·  DNI ${opts.client.dni}  ·  ${opts.client.phone}`,
+    clientLine: `${fullName(opts.client)}  ·  DNI ${opts.client.dni || "pendiente"}  ·  ${opts.client.phone}`,
     index: opts.photos.map((p) => `${p.label} - ${p.name}`),
     files,
     logoDataUrl: opts.logoDataUrl,
   });
   const stamp = new Date().toISOString().slice(0, 10);
-  const filename = `WhatsApp_${opts.client.lastName}_${stamp}.pdf`;
+  const filename =
+    mode === "prospect"
+      ? `Consulta_DNI_${opts.client.lastName || "WhatsApp"}_${stamp}.pdf`
+      : `WhatsApp_${opts.client.lastName}_${stamp}.pdf`;
   downloadPdf(bytes, filename);
   const doc: VaultDoc = {
     id: crypto.randomUUID(),
@@ -85,7 +134,10 @@ export async function assembleClientPdf(opts: {
   return { doc, filename, bytes };
 }
 
-export function packedReply(_firstName?: string, _filename?: string, _count?: number) {
+export function packedReply(firstName?: string, _filename?: string, _count?: number, mode: PackMode = "full") {
+  if (mode === "prospect") {
+    return `✅ Recibí tu DNI, ${firstName ?? "gracias"}. Tu consulta quedó pendiente de aprobación — un productor te contacta para cotizar.`;
+  }
   return "✅ ¡Listo! Armé el expediente PDF con la documentación.";
 }
 
