@@ -9,7 +9,9 @@ import {
   sendTestWhatsApp,
 } from "@/lib/outbound";
 
-const WEBHOOK_URL = "http://localhost:8787/webhook";
+const WEBHOOK_URL = import.meta.env.PROD
+  ? "https://api.lia-estudio.com/webhook"
+  : "http://localhost:8787/webhook";
 
 export function MetaWizard() {
   const { state, updateBot } = useLia();

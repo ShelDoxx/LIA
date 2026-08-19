@@ -1,0 +1,5 @@
+# Proxy bot API (prod: Cloudflare Pages → api.lia-estudio.com)
+/api/bot/*  https://api.lia-estudio.com/:splat  200
+
+# SPA fallback
+/*    /index.html   200
