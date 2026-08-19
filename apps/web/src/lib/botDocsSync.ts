@@ -1,5 +1,6 @@
 import { arMobileKey, normalizePhoneAR } from "@lia/nlu";
 import type { Client, Conversation, LiaState, VaultDoc } from "@/lib/types";
+import { botUrl } from "@/lib/botBase";
 import { getLiaSecret } from "@/lib/outbound";
 
 type PendingDoc = {
@@ -33,7 +34,7 @@ function phoneMatch(clientPhone: string, docPhone: string) {
 export async function pullPendingBotDocs(state: LiaState): Promise<LiaState> {
   try {
     const secret = getLiaSecret();
-    const res = await fetch("/api/bot/pending-docs", {
+    const res = await fetch(botUrl("/pending-docs"), {
       headers: secret ? { "X-Lia-Secret": secret } : {},
     });
     if (!res.ok) return state;

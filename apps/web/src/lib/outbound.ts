@@ -1,4 +1,5 @@
 import type { LiaState } from "@/lib/types";
+import { botUrl } from "@/lib/botBase";
 
 /** Secret compartido bot↔web. El productor lo copia de la consola del bot la primera vez. */
 export function getLiaSecret(): string {
@@ -38,7 +39,7 @@ export function shouldSendWhatsApp(state: LiaState) {
 export async function sendOutboundBatch(messages: OutboundMessage[]): Promise<OutboundResult> {
   if (!messages.length) return { sent: 0, failed: 0, demo: false, whatsapp: false };
   try {
-    const res = await fetch("/api/bot/jobs/outbound", {
+    const res = await fetch(botUrl("/jobs/outbound"), {
       method: "POST",
       headers: botHeaders(),
       body: JSON.stringify({ messages }),
@@ -56,7 +57,7 @@ export async function pushMetaConfigToBot(meta: {
   metaVerifyToken?: string;
 }): Promise<boolean> {
   try {
-    const res = await fetch("/api/bot/config", {
+    const res = await fetch(botUrl("/config"), {
       method: "POST",
       headers: botHeaders(),
       body: JSON.stringify({
@@ -76,7 +77,7 @@ export async function sendTestWhatsApp(
   text?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await fetch("/api/bot/test-message", {
+    const res = await fetch(botUrl("/test-message"), {
       method: "POST",
       headers: botHeaders(),
       body: JSON.stringify({ phone: phone.replace(/\D/g, ""), text }),

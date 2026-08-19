@@ -1,4 +1,6 @@
 import type { LiaState } from "@/lib/types";
+import { botUrl } from "@/lib/botBase";
+import { getLiaSecret } from "@/lib/outbound";
 
 export function buildBotContextPayload(state: LiaState) {
   const origin = typeof window !== "undefined" ? window.location.origin : "https://lia.app";
@@ -35,9 +37,13 @@ export function buildBotContextPayload(state: LiaState) {
 
 export async function syncBotContext(state: LiaState): Promise<boolean> {
   try {
-    const res = await fetch("/api/bot/context", {
+    const secret = getLiaSecret();
+    const res = await fetch(botUrl("/context"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(secret ? { "X-Lia-Secret": secret } : {}),
+      },
       body: JSON.stringify(buildBotContextPayload(state)),
     });
     return res.ok;

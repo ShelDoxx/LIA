@@ -10,6 +10,7 @@ interface ImportMetaEnv {
   readonly VITE_FIREBASE_APP_ID?: string;
   readonly VITE_MP_CHECKOUT_URL?: string;
   readonly VITE_STRIPE_CHECKOUT_URL?: string;
+  readonly VITE_BOT_API_URL?: string;
 }
 
 interface ImportMeta {

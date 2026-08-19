@@ -22,6 +22,29 @@ import {
 import { subscribeAppToWaba } from "./subscribeWaba.js";
 
 const app = express();
+
+const ALLOWED_ORIGINS = [
+  "https://app.lia-estudio.com",
+  "https://lia-estudio.com",
+  "https://www.lia-estudio.com",
+  /^https:\/\/lia-[a-z0-9-]+\.pages\.dev$/,
+];
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.some((o) => (typeof o === "string" ? o === origin : o.test(origin)))) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Lia-Secret");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
+
 app.use(express.json());
 
 const demoClient: BotClient = {

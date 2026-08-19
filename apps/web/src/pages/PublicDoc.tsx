@@ -5,6 +5,7 @@ import { Badge, Card } from "@/components/ui";
 import { useLia } from "@/context/LiaContext";
 import { fmtDate, fullName, money } from "@/lib/format";
 import { POLICY_LABEL, type PolicyType } from "@/lib/types";
+import { botUrl } from "@/lib/botBase";
 
 type PublicPolicy = {
   id: string;
@@ -41,7 +42,7 @@ export function PublicDoc() {
       setError(false);
       return;
     }
-    void fetch(`/api/bot/public/policy/${policyId}`)
+    void fetch(botUrl(`/public/policy/${policyId}`))
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("404"))))
       .then((b: { policy: PublicPolicy }) => {
         setPolicy(b.policy);

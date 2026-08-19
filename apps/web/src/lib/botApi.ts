@@ -1,3 +1,5 @@
+import { botUrl } from "@/lib/botBase";
+
 export type BotHealth = {
   ok: boolean;
   contextClients?: number;
@@ -8,7 +10,7 @@ export type BotHealth = {
 
 export async function fetchBotHealth(): Promise<BotHealth> {
   try {
-    const res = await fetch("/api/bot/health");
+    const res = await fetch(botUrl("/health"));
     if (!res.ok) return { ok: false };
     const data = (await res.json()) as Record<string, unknown>;
     return {
@@ -25,7 +27,7 @@ export async function fetchBotHealth(): Promise<BotHealth> {
 
 export async function simulateBotReply(phone: string, text: string): Promise<string | null> {
   try {
-    const res = await fetch("/api/bot/simulate", {
+    const res = await fetch(botUrl("/simulate"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, phone: phone.replace(/\D/g, "") }),
