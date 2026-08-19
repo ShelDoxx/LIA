@@ -7,7 +7,7 @@ import { runBirthdayGreetings, runPaymentReminders } from "./reminders.js";
 import { clientByPhone, contextClientCount, fallbackClient, updateContext, type ContextPayload } from "./contextStore.js";
 import { downloadWhatsAppMedia } from "./media.js";
 import { drainInbox, enqueueChatMessage } from "./pendingDocs.js";
-import { handleIdentify } from "./identify.js";
+import { handleIdentify, canUseGeneralNlu, identifyReminder, ensureIdentifySession } from "./identify.js";
 import { handleIncomingPhoto, handleIncomingText } from "./packHandler.js";
 import { touchWindow, isWindowOpen } from "./windowStore.js";
 import { policyById } from "./policyStore.js";
@@ -286,6 +286,10 @@ app.post("/webhook", verifyWebhookSignature, async (req, res) => {
       const identify = handleIdentify(from, body);
       if (identify) {
         await sendText(from, identify);
+        continue;
+      }
+      if (!canUseGeneralNlu(from)) {
+        await sendText(from, identifyReminder(from));
         continue;
       }
       const answer = replyTo(body, resolveClient(from));

@@ -128,3 +128,32 @@ export function handleIdentify(phone: string, text: string): string | null {
 
   return "Pasame DNI (sin puntos), patente o número de póliza. Así confirmo que estás en la cartera.";
 }
+
+/** Cliente verificado o prospecto que ya pasó identificación mínima. */
+export function canUseGeneralNlu(phone: string): boolean {
+  const known = clientByPhone(phone);
+  if (known?.verified) return true;
+  const session = sessions.get(phone);
+  if (session?.step === "confirm" || session?.step === "need_name") return true;
+  if (known && !known.verified && (known.firstName ?? "").trim()) return true;
+  return false;
+}
+
+export function identifyReminder(phone: string): string {
+  const session = sessions.get(phone);
+  if (session?.step === "need_name") {
+    return "Decime nombre y apellido (ejemplo: Ana Pérez) para seguir con tu consulta.";
+  }
+  if (session?.step === "confirm") {
+    return "Respondé sí o no para confirmar tu ficha.";
+  }
+  return askId();
+}
+
+export function ensureIdentifySession(phone: string) {
+  if (clientByPhone(phone)?.verified) return;
+  if (!sessions.has(phone)) {
+    sessions.set(phone, { step: "need_id" });
+    persistSessions();
+  }
+}

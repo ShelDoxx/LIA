@@ -80,8 +80,8 @@ export function MetaWizard() {
         </Badge>
       </div>
       <p className="text-sm text-ink-soft">
-        WhatsApp real ya envía y recibe si el bot está en línea y Meta está verificado. Guardá token y
-        Phone Number ID, tildá envío real, y usá ngrok para el webhook.
+        WhatsApp real envía y recibe si el bot está en línea. Webhook en producción:{" "}
+        <code className="text-xs">https://api.lia-estudio.com/webhook</code>
       </p>
       <p className="text-sm text-ink-soft">
         Cuando tengas token y Phone Number ID, pegálos acá. El bot los usa para enviar mora, cuotas
@@ -135,8 +135,9 @@ export function MetaWizard() {
         <p className="font-medium text-forest">URL del webhook en Meta</p>
         <p className="mt-1 break-all font-mono">{webhookHint}</p>
         <p className="mt-2">
-          En local usá ngrok (<code className="text-[10px]">ngrok http 8787</code>) y pegá la URL pública
-          acá. Verify token = el mismo de arriba. Suscripción: messages.
+          {import.meta.env.PROD
+            ? "Pegá esta URL en Meta Developers → WhatsApp → Configuration. Verify token = el de arriba. Suscripción: messages."
+            : "En local usá ngrok (ngrok http 8787). Verify token = el de arriba. Suscripción: messages."}
         </p>
       </div>
 

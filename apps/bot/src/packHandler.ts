@@ -6,9 +6,12 @@ import {
   addPhoto,
   clearPack,
   getPack,
+  hasConsentSent,
   isPackClose,
+  markConsentSent,
   type PackPhoto,
 } from "./packUtils.js";
+import { ensureIdentifySession } from "./identify.js";
 import { sendDocument, sendText } from "./whatsapp.js";
 
 function bytesToBase64(bytes: Uint8Array) {
@@ -145,7 +148,15 @@ function photoAck(mode: PackMode, count: number): string {
 
 export async function handleIncomingPhoto(phone: string, bytes: Uint8Array, mime: string) {
   const mode = resolveMode(phone);
+  ensureIdentifySession(phone);
   const before = getPack(phone, mode).photos.length;
+  if (before === 0 && mode === "prospect" && !hasConsentSent(phone)) {
+    await sendText(
+      phone,
+      `Al mandar fotos aceptás que ${studioName()} use tus datos para cotizar (Ley 25.326).`,
+    );
+    markConsentSent(phone);
+  }
   const count = addPhoto(phone, {
     label: slotLabelForMode(before, mode),
     bytes,

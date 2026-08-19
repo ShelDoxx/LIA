@@ -7,9 +7,10 @@ import { Badge, Button, Card, inputClass } from "@/components/ui";
 import { generateDunningMessage, generatePaymentReminderMessage, generateRenewalMessage, generateRetentionMessage, generateStuckClaimMessage } from "@/data/ramos";
 import type { RenewalBucket } from "@/data/ramos";
 import { POLICY_LABEL } from "@/lib/types";
-import { daysUntil, fmtDateTime, fullName } from "@/lib/format";
+import { daysUntil, fmtDate, fmtDateTime, fullName } from "@/lib/format";
 import { PHOTO_SLOTS, slotLabel } from "@/lib/waPack";
-import type { ChatMessage } from "@/lib/types";
+import { sendOutboundBatch, shouldSendWhatsApp } from "@/lib/outbound";
+import type { ChatMessage, Client, LiaState } from "@/lib/types";
 
 function previewInbox(m?: ChatMessage): string {
   if (!m) return "Sin mensajes";
@@ -17,6 +18,19 @@ function previewInbox(m?: ChatMessage): string {
   if (m.kind === "file" || m.kind === "expediente") return "📄 Archivo";
   const t = m.text.replace(/\s+/g, " ").trim();
   return t.length > 42 ? `${t.slice(0, 42)}…` : t;
+}
+
+function fillTemplate(body: string, state: LiaState, client?: Client): string {
+  const policy = client
+    ? state.policies.find((p) => p.clientId === client.id && p.status !== "cancelada")
+    : undefined;
+  const origin = typeof window !== "undefined" ? window.location.origin : "https://app.lia-estudio.com";
+  return body
+    .replace(/\[Nombre\]/g, client?.firstName ?? "…")
+    .replace(/\[Ramo\]/g, policy ? POLICY_LABEL[policy.type] : "…")
+    .replace(/\[Fecha\]/g, policy ? fmtDate(policy.nextDueDate) : "…")
+    .replace(/\[Link\]/g, policy ? `${origin}/c/${policy.id}/cupon` : "…")
+    .replace(/\[Años\]/g, "…");
 }
 
 const templates = [
@@ -82,6 +96,7 @@ export function WhatsApp() {
   );
   const [draft, setDraft] = useState("");
   const [sim, setSim] = useState("Te mando las fotos del DNI");
+  const [tplMsg, setTplMsg] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const conv = state.conversations.find((c) => c.id === active);
   const client = conv ? state.clients.find((x) => x.id === conv.clientId) : undefined;
@@ -210,6 +225,38 @@ export function WhatsApp() {
   async function onPhotos(list: FileList | null) {
     if (!conv || !list?.length || isProcessingMedia) return;
     await receiveClientPhotos(conv.id, [...list]);
+  }
+
+  async function sendTemplate(body: string) {
+    if (!client) {
+      setTplMsg("Elegí un cliente en la bandeja.");
+      return;
+    }
+    const text = fillTemplate(body, state, client);
+    const convId = await injectLiaMessage(client.id, text);
+    if (convId) setActive(convId);
+    if (shouldSendWhatsApp(state) && client.phone) {
+      const wa = await sendOutboundBatch([{ phone: client.phone.replace(/\D/g, ""), text }]);
+      setTplMsg(
+        wa.sent > 0
+          ? "Enviado por WhatsApp Meta."
+          : "Quedó en el hilo. Meta no confirmó envío (¿ventana 24 h?).",
+      );
+    } else {
+      setTplMsg("Quedó en el hilo del simulador.");
+    }
+    window.setTimeout(() => setTplMsg(""), 4000);
+  }
+
+  async function copyTemplate(body: string) {
+    const text = fillTemplate(body, state, client);
+    try {
+      await navigator.clipboard.writeText(text);
+      setTplMsg("Copiado.");
+      window.setTimeout(() => setTplMsg(""), 2500);
+    } catch {
+      setTplMsg("No pude copiar.");
+    }
   }
 
   return (
@@ -448,11 +495,36 @@ export function WhatsApp() {
         </Card>
 
         <Card className="space-y-3 p-4">
-          <p className="font-medium">Plantillas que venden</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="font-medium">Plantillas</p>
+            {tplMsg ? <span className="text-xs text-gold">{tplMsg}</span> : null}
+          </div>
+          <p className="text-xs text-ink-soft">
+            Completan [Nombre] y [Ramo] del cliente activo. Enviar usa Meta si el bot está live.
+          </p>
           {templates.map((t) => (
             <div key={t.name} className="rounded-md bg-paper-2 p-3">
               <p className="text-xs uppercase tracking-wide text-gold">{t.title}</p>
-              <p className="mt-1 text-sm">{t.body}</p>
+              <p className="mt-1 text-sm">{fillTemplate(t.body, state, client)}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-8 px-2 text-xs"
+                  onClick={() => void copyTemplate(t.body)}
+                >
+                  Copiar
+                </Button>
+                <Button
+                  type="button"
+                  variant="gold"
+                  className="h-8 px-2 text-xs"
+                  disabled={!client}
+                  onClick={() => void sendTemplate(t.body)}
+                >
+                  Enviar al hilo
+                </Button>
+              </div>
             </div>
           ))}
         </Card>
