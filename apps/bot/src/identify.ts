@@ -23,7 +23,9 @@ function persistSessions() {
 }
 
 function askId() {
-  return "Hola, soy Lía. No tengo este WhatsApp asociado a una ficha. Para verificar que sos cliente del estudio, pasame DNI, patente o número de póliza.";
+  return `Hola, soy Lía de ${studioName()}. Al seguir este chat aceptás que usemos tus datos para gestionar tu seguro (Ley 25.326).
+
+Para ayudarte, pasame tu DNI (sin puntos). Si ya sos cliente del estudio, también sirve patente o número de póliza.`;
 }
 
 export function handleIdentify(phone: string, text: string): string | null {
@@ -109,7 +111,7 @@ export function handleIdentify(phone: string, text: string): string | null {
     }
     sessions.set(phone, { step: "need_name" });
     persistSessions();
-    return "No aparece en la cartera con ese dato. ¿Me decís nombre y apellido? Lo dejo pendiente para que tu productor lo revise (no te marco como cliente hasta que lo confirme).";
+    return "No te encontré en la cartera con ese DNI. Decime nombre y apellido (ejemplo: Ana Pérez). Si querés cotizar, mandame foto frente y dorso del DNI — armo tu ficha pendiente de aprobación del productor.";
   }
 
   if (cue.kind === "name" && session.step === "need_id") {

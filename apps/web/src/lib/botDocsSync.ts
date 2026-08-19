@@ -1,5 +1,5 @@
 import { arMobileKey, normalizePhoneAR } from "@lia/nlu";
-import type { Client, Conversation, LiaState, VaultDoc } from "@/lib/types";
+import type { ChatMessage, Client, Conversation, LiaState, VaultDoc } from "@/lib/types";
 import { botUrl } from "@/lib/botBase";
 import { getLiaSecret } from "@/lib/outbound";
 
@@ -25,10 +25,84 @@ type PendingLead = {
   lastName: string;
 };
 
+type PendingChatMessage = {
+  id: string;
+  phone: string;
+  from: "client" | "lia";
+  text: string;
+  at: string;
+  kind?: "text" | "image" | "file";
+};
+
 function phoneMatch(clientPhone: string, docPhone: string) {
   const a = arMobileKey(clientPhone);
   const b = arMobileKey(docPhone);
   return Boolean(a) && a === b;
+}
+
+function toChatMessage(m: PendingChatMessage): ChatMessage {
+  return {
+    id: m.id,
+    from: m.from,
+    text: m.text,
+    at: m.at,
+    kind: m.kind === "image" ? "image" : m.kind === "file" ? "file" : undefined,
+  };
+}
+
+function mergeMessages(conv: Conversation, incoming: PendingChatMessage[]): Conversation {
+  const ids = new Set(conv.messages.map((m) => m.id));
+  const added = incoming.filter((m) => !ids.has(m.id)).map(toChatMessage);
+  if (!added.length) return conv;
+  const messages = [...conv.messages, ...added].sort((a, b) => a.at.localeCompare(b.at));
+  const clientMsgs = added.filter((m) => m.from === "client").length;
+  return {
+    ...conv,
+    messages,
+    lastAt: messages.at(-1)!.at,
+    unread: conv.unread + clientMsgs,
+  };
+}
+
+function ensureThread(state: LiaState, phone: string, now: string): LiaState {
+  const normalized = normalizePhoneAR(phone) || phone.replace(/\D/g, "");
+  let client = state.clients.find((c) => phoneMatch(c.phone, normalized));
+  let next = state;
+
+  if (!client) {
+    client = {
+      id: crypto.randomUUID(),
+      firstName: "Contacto",
+      lastName: "WhatsApp",
+      dni: "",
+      email: "",
+      phone: normalized,
+      birthDate: "",
+      address: "",
+      city: "",
+      notes: "Escritura por WhatsApp. Completá DNI y confirmá en ficha.",
+      family: [],
+      createdAt: now,
+      tags: ["whatsapp-prospecto"],
+      lastContactAt: now,
+    };
+    next = { ...next, clients: [client, ...next.clients] };
+  }
+
+  const existingConv = next.conversations.find(
+    (c) => c.clientId === client!.id || phoneMatch(c.phone, normalized),
+  );
+  if (existingConv) return next;
+
+  const conv: Conversation = {
+    id: crypto.randomUUID(),
+    clientId: client.id,
+    phone: normalized,
+    lastAt: now,
+    unread: 0,
+    messages: [],
+  };
+  return { ...next, conversations: [conv, ...next.conversations] };
 }
 
 export async function pullPendingBotDocs(state: LiaState): Promise<LiaState> {
@@ -42,11 +116,13 @@ export async function pullPendingBotDocs(state: LiaState): Promise<LiaState> {
       docs?: PendingDoc[];
       links?: PendingPhoneLink[];
       leads?: PendingLead[];
+      messages?: PendingChatMessage[];
     };
     const docs = body.docs ?? [];
     const links = body.links ?? [];
     const leads = body.leads ?? [];
-    if (!docs.length && !links.length && !leads.length) return state;
+    const messages = body.messages ?? [];
+    if (!docs.length && !links.length && !leads.length && !messages.length) return state;
 
     let next = state;
     const now = new Date().toISOString();
@@ -84,7 +160,7 @@ export async function pullPendingBotDocs(state: LiaState): Promise<LiaState> {
         birthDate: "",
         address: "",
         city: "",
-        notes: `Consulta por WhatsApp sin ficha. Número ${lead.phone}. Confirmá si es cliente.`,
+        notes: `Lead WhatsApp · ${lead.phone}. Confirmá DNI en ficha.`,
         family: [],
         createdAt: now,
         tags: ["whatsapp-pendiente"],
@@ -95,21 +171,41 @@ export async function pullPendingBotDocs(state: LiaState): Promise<LiaState> {
         clientId: client.id,
         phone: client.phone,
         lastAt: now,
-        unread: 1,
-        messages: [
-          {
-            id: crypto.randomUUID(),
-            from: "lia",
-            text: "Consulta WhatsApp: no estaba en la cartera. Pendiente de confirmar.",
-            at: now,
-          },
-        ],
+        unread: 0,
+        messages: [],
       };
       next = {
         ...next,
         clients: [client, ...next.clients],
         conversations: [conv, ...next.conversations],
       };
+    }
+
+    if (messages.length) {
+      const byPhone = new Map<string, PendingChatMessage[]>();
+      for (const m of messages) {
+        const key = arMobileKey(m.phone) || m.phone.replace(/\D/g, "");
+        if (!key) continue;
+        const list = byPhone.get(key) ?? [];
+        list.push(m);
+        byPhone.set(key, list);
+      }
+      for (const [, batch] of byPhone) {
+        const phone = batch[0]!.phone;
+        next = ensureThread(next, phone, batch.at(-1)!.at);
+        const normalized = normalizePhoneAR(phone) || phone.replace(/\D/g, "");
+        const client = next.clients.find((c) => phoneMatch(c.phone, normalized));
+        if (!client) continue;
+        const conv = next.conversations.find(
+          (c) => c.clientId === client.id || phoneMatch(c.phone, normalized),
+        );
+        if (!conv) continue;
+        const merged = mergeMessages(conv, batch);
+        next = {
+          ...next,
+          conversations: next.conversations.map((c) => (c.id === conv.id ? merged : c)),
+        };
+      }
     }
 
     for (const d of docs) {

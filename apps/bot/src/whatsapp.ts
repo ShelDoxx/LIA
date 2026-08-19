@@ -1,6 +1,7 @@
 import { config as envConfig } from "./config.js";
 import { getWhatsAppConfig, isWhatsAppConfigured } from "./runtimeConfig.js";
 import { isWindowOpen } from "./windowStore.js";
+import { enqueueChatMessage } from "./pendingDocs.js";
 
 const GRAPH = `https://graph.facebook.com/${envConfig.graphVersion}`;
 
@@ -23,6 +24,17 @@ export function metaAllowlistVariantsAR(to: string): string[] {
     }
   }
   return [...new Set(variants.filter(Boolean))];
+}
+
+function logOutbound(to: string, text: string, kind: "text" | "file" = "text") {
+  enqueueChatMessage({
+    id: crypto.randomUUID(),
+    phone: to.replace(/\D/g, ""),
+    from: "lia",
+    text,
+    at: new Date().toISOString(),
+    kind,
+  });
 }
 
 async function postMessage(to: string, payload: Record<string, unknown>) {
@@ -55,6 +67,7 @@ async function sendWithArAllowlistFallback(to: string, payload: Record<string, u
 export async function sendText(to: string, body: string) {
   if (!isWhatsAppConfigured()) {
     console.log("[demo] WhatsApp →", to, body.slice(0, 80) + (body.length > 80 ? "…" : ""));
+    logOutbound(to, body);
     return { demo: true };
   }
   // Meta sólo acepta texto libre dentro de la ventana de 24 h post-inbound.
@@ -67,10 +80,12 @@ export async function sendText(to: string, body: string) {
     // Intento de plantilla proactiva; si falla (número no en lista de prueba, etc.) lanzará el error.
     return sendTemplate(to, "hello_world", "en_US", []);
   }
-  return sendWithArAllowlistFallback(to, {
+  const result = await sendWithArAllowlistFallback(to, {
     type: "text",
     text: { preview_url: true, body },
   });
+  logOutbound(to, body);
+  return result;
 }
 
 export async function sendTemplate(
@@ -132,5 +147,6 @@ export async function sendDocument(to: string, bytes: Uint8Array, filename: stri
     }),
   });
   if (!res.ok) throw new Error(`document send ${res.status}: ${await res.text()}`);
+  logOutbound(phone, caption ?? `📄 ${filename}`, "file");
   return res.json();
 }

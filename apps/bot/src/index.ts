@@ -6,7 +6,7 @@ import { sendTemplate, sendText } from "./whatsapp.js";
 import { runBirthdayGreetings, runPaymentReminders } from "./reminders.js";
 import { clientByPhone, contextClientCount, fallbackClient, updateContext, type ContextPayload } from "./contextStore.js";
 import { downloadWhatsAppMedia } from "./media.js";
-import { drainInbox } from "./pendingDocs.js";
+import { drainInbox, enqueueChatMessage } from "./pendingDocs.js";
 import { handleIdentify } from "./identify.js";
 import { handleIncomingPhoto, handleIncomingText } from "./packHandler.js";
 import { touchWindow, isWindowOpen } from "./windowStore.js";
@@ -199,6 +199,34 @@ function resolveClient(from: string): BotClient {
   return clientByPhone(from) ?? fallbackClient();
 }
 
+function logInbound(
+  from: string,
+  msg: { id?: string; timestamp?: string; type?: string; text?: { body?: string } },
+) {
+  const phone = from.replace(/\D/g, "");
+  const at = msg.timestamp
+    ? new Date(Number(msg.timestamp) * 1000).toISOString()
+    : new Date().toISOString();
+  let text = msg.text?.body?.trim() ?? "";
+  let kind: "text" | "image" | "file" = "text";
+  if (msg.type === "image") {
+    text = text || "📷 Foto enviada";
+    kind = "image";
+  } else if (msg.type === "document") {
+    text = text || "📎 Documento enviado";
+    kind = "file";
+  }
+  if (!text) return;
+  enqueueChatMessage({
+    id: String(msg.id ?? crypto.randomUUID()),
+    phone,
+    from: "client",
+    text,
+    at,
+    kind,
+  });
+}
+
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -228,6 +256,7 @@ app.post("/webhook", verifyWebhookSignature, async (req, res) => {
     console.log("[webhook] inbound", messages.map((m: { from?: string; type?: string }) => `${m.from}:${m.type}`).join(", "));
     for (const msg of messages) {
       const from = msg.from as string;
+      logInbound(from, msg);
       // Registrar inbound: abre/renueva la ventana de 24 h de Meta.
       touchWindow(from);
       if (msg.type === "image" && msg.image?.id) {

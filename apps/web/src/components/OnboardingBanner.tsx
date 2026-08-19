@@ -15,7 +15,7 @@ export function OnboardingBanner() {
     ? [
         {
           title: "1. Configurá el Bot de WhatsApp",
-          body: "Sin Bot conectado no salen mensajes reales. En Ajustes → Meta Cloud API pegá: Access Token, Phone Number ID y Verify Token. Para el webhook usá ngrok apuntando al bot. Después tocá “Guardar y activar”.",
+          body: "Sin Bot conectado no salen mensajes reales. En Ajustes → Meta Cloud API pegá: Access Token, Phone Number ID, Verify Token y el secret del bot. Webhook: https://api.lia-estudio.com/webhook. Después tocá “Guardar y activar”.",
           cta: "Abrir Meta Cloud API",
           to: "/ajustes",
         },

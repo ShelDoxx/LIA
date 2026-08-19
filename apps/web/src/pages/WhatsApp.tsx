@@ -11,6 +11,14 @@ import { daysUntil, fmtDateTime, fullName } from "@/lib/format";
 import { PHOTO_SLOTS, slotLabel } from "@/lib/waPack";
 import type { ChatMessage } from "@/lib/types";
 
+function previewInbox(m?: ChatMessage): string {
+  if (!m) return "Sin mensajes";
+  if (m.kind === "image") return "📷 Foto";
+  if (m.kind === "file" || m.kind === "expediente") return "📄 Archivo";
+  const t = m.text.replace(/\s+/g, " ").trim();
+  return t.length > 42 ? `${t.slice(0, 42)}…` : t;
+}
+
 const templates = [
   {
     name: "r90",
@@ -78,6 +86,7 @@ export function WhatsApp() {
   const conv = state.conversations.find((c) => c.id === active);
   const client = conv ? state.clients.find((x) => x.id === conv.clientId) : undefined;
   const pending = conv?.pendingPhotos ?? [];
+  const live = state.bot.connected;
 
   useEffect(() => {
     if (!presetClient) return;
@@ -209,9 +218,11 @@ export function WhatsApp() {
         <div className="border-b border-line px-4 py-3">
           <div className="flex items-center gap-2">
             <p className="font-medium">Bandeja de Lía</p>
-            <Badge tone="gold">Simulador</Badge>
+            <Badge tone={live ? "forest" : "gold"}>{live ? "WhatsApp live" : "Simulador"}</Badge>
           </div>
-          <p className="text-xs text-ink-soft">Las fotos van a la ficha de ese cliente</p>
+          <p className="text-xs text-ink-soft">
+            {live ? "Mensajes reales de Meta · se sincronizan solos" : "Probá flujos sin celular"}
+          </p>
         </div>
         {state.conversations.map((c) => {
           const who = state.clients.find((x) => x.id === c.clientId);
@@ -228,10 +239,8 @@ export function WhatsApp() {
               }`}
             >
               <div className="min-w-0 flex-1">
-                <p className="font-medium">{who ? fullName(who) : c.phone}</p>
-                <p className="truncate text-sm text-ink-soft">
-                  {last?.kind === "image" || last?.kind === "file" ? last.text : last?.text}
-                </p>
+                <p className="truncate font-medium">{who ? fullName(who) : c.phone}</p>
+                <p className="line-clamp-2 text-sm leading-snug text-ink-soft">{previewInbox(last)}</p>
               </div>
               {c.botPaused ? (
                 <Badge tone="warn">Pausa</Badge>
@@ -384,7 +393,13 @@ export function WhatsApp() {
                 className={inputClass}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder={isProcessingMedia ? "Procesando imágenes y armando PDF..." : "Simular mensaje del cliente… o LISTO"}
+                placeholder={
+                  isProcessingMedia
+                    ? "Procesando imágenes y armando PDF..."
+                    : live
+                      ? "Simular respuesta del cliente (opcional)…"
+                      : "Simular mensaje del cliente… o LISTO"
+                }
                 disabled={isProcessingMedia}
               />
               <Button type="submit" disabled={isProcessingMedia}>
@@ -426,7 +441,9 @@ export function WhatsApp() {
             </Badge>
           </div>
           <p className="mt-2 text-xs text-ink-soft">
-            Con el bot activo, el simulador usa el mismo NLU que Meta. Sin bot, responde el motor web.
+            {live
+              ? "Los chats reales llegan de Meta. El simulador de abajo es opcional para probar sin celular."
+              : "Con el bot activo, el simulador usa el mismo NLU que Meta. Sin bot, responde el motor web."}
           </p>
         </Card>
 
@@ -469,6 +486,7 @@ export function WhatsApp() {
           </label>
         </Card>
 
+        {!live && (
         <Card className="p-4">
           <p className="mb-2 font-medium">Probar como el cliente</p>
           <select className={inputClass} value={sim} onChange={(e) => setSim(e.target.value)}>
@@ -514,6 +532,7 @@ export function WhatsApp() {
             />
           </label>
         </Card>
+        )}
       </div>
     </div>
   );
