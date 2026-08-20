@@ -1,4 +1,5 @@
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useLia } from "@/context/LiaContext";
 import { Button, Card } from "@/components/ui";
 import { CheckoutPlans } from "@/components/CheckoutPlans";
@@ -9,12 +10,35 @@ import {
   type SubscriptionPlan,
 } from "@/lib/billing";
 
+function readPendingPlan(): SubscriptionPlan | null {
+  try {
+    const p = sessionStorage.getItem("lia_checkout_plan");
+    if (p === "self" || p === "setup") return p;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function clearPendingPlan() {
+  try {
+    sessionStorage.removeItem("lia_checkout_plan");
+  } catch {
+    /* ignore */
+  }
+}
+
 export function Activar() {
   const { state, save } = useLia();
+  const [params] = useSearchParams();
   const sub = state.producer.subscription;
   const meetPending = sub?.status === "active" && sub.setupMeetPending;
+  const [pendingPlan, setPendingPlan] = useState<SubscriptionPlan | null>(() => readPendingPlan());
+  const [msg, setMsg] = useState("");
 
   function onActivate(plan: SubscriptionPlan) {
+    clearPendingPlan();
+    setPendingPlan(null);
     void save({
       ...state,
       producer: {
@@ -26,7 +50,33 @@ export function Activar() {
         ),
       },
     });
+    setMsg(plan === "setup" ? "Plan activo. Coordiná el meet." : "Plan Self activo.");
   }
+
+  // Vuelta desde Mercado Pago: ?paid=1&plan=self|setup
+  useEffect(() => {
+    const paid = params.get("paid") === "1" || params.get("status") === "approved";
+    const planParam = params.get("plan");
+    const plan: SubscriptionPlan | null =
+      planParam === "setup" || planParam === "self" ? planParam : readPendingPlan();
+    if (!paid || !plan) return;
+    if (sub?.status === "active") return;
+    onActivate(plan);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Si eligió un plan y vuelve del tab de MP, ofrecer confirmar
+  useEffect(() => {
+    function onFocus() {
+      setPendingPlan(readPendingPlan());
+    }
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, []);
 
   function openMeet() {
     window.open(setupMeetWhatsAppUrl(state.producer.name), "_blank", "noopener,noreferrer");
@@ -51,6 +101,8 @@ export function Activar() {
         </p>
       </div>
 
+      {msg ? <p className="text-sm text-gold">{msg}</p> : null}
+
       {meetPending ? (
         <Card className="border-gold/40 bg-gold/5 p-6">
           <h2 className="font-serif text-2xl text-forest">Plan activo · coordinemos el setup</h2>
@@ -73,7 +125,21 @@ export function Activar() {
           </Link>
         </Card>
       ) : (
-        <CheckoutPlans producerName={state.producer.name} onActivate={onActivate} />
+        <>
+          {pendingPlan ? (
+            <Card className="border-gold/40 bg-gold/5 p-5">
+              <p className="font-serif text-xl text-forest">¿Ya pagaste en Mercado Pago?</p>
+              <p className="mt-2 text-sm text-ink-soft">
+                Si el pago figura aprobado, activá el plan acá. Elegiste{" "}
+                <strong>{pendingPlan === "setup" ? "Setup completo" : "Self-service"}</strong>.
+              </p>
+              <Button variant="gold" className="mt-4 py-3" onClick={() => onActivate(pendingPlan)}>
+                Ya pagué — activar plan
+              </Button>
+            </Card>
+          ) : null}
+          <CheckoutPlans producerName={state.producer.name} onActivate={onActivate} />
+        </>
       )}
     </div>
   );

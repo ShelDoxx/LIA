@@ -144,16 +144,13 @@ export function startCheckout(
 
   if (url) {
     if (optimistic) onLocalActivate(choice);
-    const sep = url.includes("?") ? "&" : "?";
-    // back_url hint si el link de MP lo permite vía query (algunos init_point lo ignoran)
     window.open(url, "_blank", "noopener,noreferrer");
-    // Guardar intención para la pantalla /activar
     try {
       sessionStorage.setItem("lia_checkout_plan", choice);
+      sessionStorage.setItem("lia_checkout_at", new Date().toISOString());
     } catch {
       /* ignore */
     }
-    void sep;
     return "checkout";
   }
   onLocalActivate(choice);
