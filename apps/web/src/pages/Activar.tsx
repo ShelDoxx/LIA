@@ -189,25 +189,17 @@ export function Activar() {
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
               <Button
-                variant="ghost"
-                disabled={busy}
-                onClick={() => void confirmPaid("self")}
-              >
-                {busy ? "Verificando…" : "Verificar Self (49)"}
-              </Button>
-              <Button
                 variant="gold"
                 disabled={busy}
-                onClick={() => void confirmPaid("setup")}
+                onClick={() => void confirmPaid(pendingPlan ?? "self")}
               >
-                {busy ? "Verificando…" : "Verificar Setup (149)"}
+                {busy ? "Verificando con Mercado Pago…" : "Verificar pago y activar"}
               </Button>
             </div>
-            {pendingPlan ? (
-              <p className="mt-3 text-xs text-ink-soft">
-                Habías elegido: {pendingPlan === "setup" ? "Setup completo" : "Self-service"}.
-              </p>
-            ) : null}
+            <p className="mt-3 text-xs text-ink-soft">
+              Sin cobro <strong>aprobado</strong> en Mercado Pago, Lía no activa. Inventar un número
+              no sirve.
+            </p>
           </Card>
           <CheckoutPlans producerName={state.producer.name} onActivate={onDemoActivate} />
         </>
