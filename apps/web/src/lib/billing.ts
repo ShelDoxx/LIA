@@ -162,7 +162,8 @@ export function startCheckout(
   if (url) {
     if (optimistic) onLocalActivate(choice);
     rememberCheckout(choice);
-    window.open(url, "_blank", "noopener,noreferrer");
+    // Misma pestaña: el back_url de MP vuelve a /activar con ?paid=1
+    window.location.assign(url);
     return "checkout";
   }
   onLocalActivate(choice);
