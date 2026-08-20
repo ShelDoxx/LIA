@@ -10,7 +10,7 @@ export function estudioState(overrides: Partial<Producer> & { name?: string; ema
     producer: {
       ...seed.producer,
       ...overrides,
-      id: crypto.randomUUID(),
+      id: overrides.id ?? crypto.randomUUID(),
       name,
       email,
       studioName: overrides.studioName ?? `Estudio ${name}`,

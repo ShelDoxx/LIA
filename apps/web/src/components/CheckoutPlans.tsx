@@ -39,6 +39,12 @@ export function CheckoutPlans({ producerName, onActivate, compact }: Props) {
 
   function pick(plan: SubscriptionPlan) {
     const mode = startCheckout(plan, onActivate);
+    if (mode === "unavailable") {
+      window.alert(
+        "El cobro no está configurado todavía. Escribinos por WhatsApp o pedí activación al admin.",
+      );
+      return;
+    }
     if (mode === "demo" && plan === "setup") {
       window.open(setupMeetWhatsAppUrl(producerName), "_blank", "noopener,noreferrer");
     }
@@ -91,8 +97,7 @@ export function CheckoutPlans({ producerName, onActivate, compact }: Props) {
 
       {!hasAny && ready && (
         <p className="text-xs text-ink-soft md:col-span-2">
-          Links de Mercado Pago aún no cargaron desde el bot. Se puede activar en modo demo en este
-          dispositivo.
+          Links de cobro no disponibles. Contactá soporte o pedí activación manual al admin.
         </p>
       )}
     </div>

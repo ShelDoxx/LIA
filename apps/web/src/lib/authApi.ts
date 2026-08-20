@@ -76,9 +76,8 @@ export async function verifyOtp(email: string, code: string, name?: string) {
 }
 
 export async function sessionFromGoogle(opts: {
-  email: string;
+  idToken: string;
   name?: string;
-  firebaseUid?: string;
 }) {
   const res = await fetch(botUrl("/auth/session-google"), {
     method: "POST",

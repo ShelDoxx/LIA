@@ -39,6 +39,7 @@ import {
   type EntitlementStatus,
 } from "./auth.js";
 import { sendOtpEmail } from "./mail.js";
+import { verifyFirebaseIdToken } from "./firebaseVerify.js";
 
 const app = express();
 
@@ -97,7 +98,9 @@ app.post("/auth/request-otp", async (req, res) => {
       return;
     }
     console.log("[auth] otp requested", otp.email, name ?? "", sent.detail);
-    const useDevHint = config.emailDevMode && !config.resendApiKey;
+    // Nunca exponer código en producción ni si Resend está configurado
+    const useDevHint =
+      config.emailDevMode && !config.resendApiKey && !config.isProduction;
     res.json({
       ok: true,
       email: otp.email,
@@ -126,15 +129,31 @@ app.post("/auth/verify-otp", (req, res) => {
   });
 });
 
-app.post("/auth/session-google", (req, res) => {
-  const email = String(req.body?.email ?? "");
-  const name = typeof req.body?.name === "string" ? req.body.name : undefined;
-  const firebaseUid = typeof req.body?.firebaseUid === "string" ? req.body.firebaseUid : undefined;
-  if (!email.includes("@")) {
-    res.status(400).json({ ok: false, error: "Email inválido" });
+app.post("/auth/session-google", async (req, res) => {
+  const idToken = String(req.body?.idToken ?? "");
+  if (!config.firebaseWebApiKey) {
+    res.status(503).json({
+      ok: false,
+      error: "Google Auth no está habilitado en el servidor (FIREBASE_WEB_API_KEY).",
+    });
     return;
   }
-  const result = loginWithVerifiedEmail({ email, name, firebaseUid });
+  if (!idToken) {
+    res.status(400).json({ ok: false, error: "idToken requerido" });
+    return;
+  }
+  const verified = await verifyFirebaseIdToken(idToken, config.firebaseWebApiKey);
+  if (!verified) {
+    res.status(401).json({ ok: false, error: "Token de Google inválido o expirado" });
+    return;
+  }
+  const name =
+    (typeof req.body?.name === "string" && req.body.name.trim()) || verified.name;
+  const result = loginWithVerifiedEmail({
+    email: verified.email,
+    name,
+    firebaseUid: verified.uid,
+  });
   res.json({
     ok: true,
     sessionToken: result.sessionToken,
@@ -374,10 +393,12 @@ app.post("/mercadopago/webhook", async (req, res) => {
     xSignature: typeof req.headers["x-signature"] === "string" ? req.headers["x-signature"] : undefined,
     xRequestId: typeof req.headers["x-request-id"] === "string" ? req.headers["x-request-id"] : undefined,
     dataId,
+    requireSecret: config.isProduction,
   });
   if (!okSig) {
-    console.warn("[mp] firma webhook inválida — igual respondemos 200 y procesamos (test)");
-    // En test a veces el manifest no matchea; no bloqueamos activación.
+    console.warn("[mp] firma webhook inválida — rechazado");
+    res.sendStatus(401);
+    return;
   }
   res.sendStatus(200);
   try {
@@ -421,8 +442,13 @@ app.get("/billing/checkout-config", (_req, res) => {
   });
 });
 
-/** Confirma pago con ID de operación de MP (pantalla de éxito). */
+/** Confirma pago con ID de operación de MP (pantalla de éxito). Requiere sesión. */
 app.post("/billing/confirm", async (req, res) => {
+  const sess = sessionFromToken(bearerToken(req));
+  if (!sess) {
+    res.status(401).json({ ok: false, error: "Iniciá sesión para activar el plan" });
+    return;
+  }
   const operationId = String(req.body?.operationId ?? req.body?.id ?? "");
   const claimed = req.body?.plan === "setup" ? "setup" : req.body?.plan === "self" ? "self" : undefined;
   try {
@@ -430,17 +456,29 @@ app.post("/billing/confirm", async (req, res) => {
       operationId,
       accessToken: config.mpAccessToken,
       claimedPlan: claimed,
+      userId: sess.user.id,
     });
     if (!result.ok || !result.activation || result.activation.status !== "active") {
       res.status(400).json({ ok: false, error: result.detail || "No se pudo confirmar el pago" });
       return;
     }
+    const act = result.activation;
+    upsertEntitlement({
+      userId: sess.user.id,
+      status: "active",
+      plan: act.plan,
+      mpPaymentId: act.mpPaymentId,
+      mpPreapprovalId: act.mpPreapprovalId,
+      updatedAt: new Date().toISOString(),
+    });
+    console.log("[billing] confirm → entitlement", sess.user.email, act.plan, act.mpPaymentId ?? act.mpPreapprovalId);
     res.json({
       ok: true,
-      plan: result.activation.plan,
-      setupMeetPending: result.activation.setupMeetPending,
-      amount: result.activation.amount,
+      plan: act.plan,
+      setupMeetPending: act.setupMeetPending,
+      amount: act.amount,
       detail: result.detail,
+      entitlement: { status: "active", plan: act.plan },
     });
   } catch (err) {
     console.error("[mp] confirm error", err);
@@ -449,10 +487,14 @@ app.post("/billing/confirm", async (req, res) => {
 });
 
 /**
- * Tras volver de MP (back_url ?paid=1), busca un cobro aprobado reciente
- * y activa. Público a propósito: el cobro debe existir en MP.
+ * Tras volver de MP (back_url ?paid=1): confirma con operationId + sesión.
  */
 app.post("/billing/sync-after-checkout", async (req, res) => {
+  const sess = sessionFromToken(bearerToken(req));
+  if (!sess) {
+    res.status(401).json({ ok: false, error: "Iniciá sesión para activar el plan" });
+    return;
+  }
   const plan = req.body?.plan === "setup" ? "setup" : req.body?.plan === "self" ? "self" : undefined;
   const sinceIso = typeof req.body?.since === "string" ? req.body.since : undefined;
   const operationId = String(req.body?.operationId ?? req.body?.op ?? "");
@@ -462,16 +504,27 @@ app.post("/billing/sync-after-checkout", async (req, res) => {
       plan,
       sinceIso,
       operationId,
+      userId: sess.user.id,
     });
     if (!result.ok || !result.activation || result.activation.status !== "active") {
       res.status(404).json({ ok: false, error: result.detail || "Sin cobro aprobado todavía" });
       return;
     }
+    const act = result.activation;
+    upsertEntitlement({
+      userId: sess.user.id,
+      status: "active",
+      plan: act.plan,
+      mpPaymentId: act.mpPaymentId,
+      mpPreapprovalId: act.mpPreapprovalId,
+      updatedAt: new Date().toISOString(),
+    });
     res.json({
       ok: true,
-      plan: result.activation.plan,
-      setupMeetPending: result.activation.setupMeetPending,
+      plan: act.plan,
+      setupMeetPending: act.setupMeetPending,
       detail: result.detail,
+      entitlement: { status: "active", plan: act.plan },
     });
   } catch (err) {
     console.error("[mp] sync-after-checkout", err);

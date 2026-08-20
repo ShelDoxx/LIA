@@ -116,19 +116,19 @@ export function Settings() {
           />
         </Field>
         <Field label="Plan">
-          <select
-            className={inputClass}
-            value={p.plan}
-            onChange={(e) =>
-              save({
-                ...state,
-                producer: { ...p, plan: e.target.value as "demo" | "estudio" },
-              })
-            }
-          >
-            <option value="estudio">Estudio — cartera real</option>
-            <option value="demo">Demo — datos de venta</option>
-          </select>
+          <p className="rounded-md border border-line bg-paper-2 px-3 py-2 text-sm">
+            {p.plan === "demo" ? "Demo (datos de muestra)" : "Estudio"}
+            {p.subscription?.status === "active"
+              ? ` · activo${p.subscription.plan ? ` (${p.subscription.plan})` : ""}`
+              : p.plan === "estudio"
+                ? " · pendiente de activación"
+                : ""}
+          </p>
+          {p.plan === "estudio" && p.subscription?.status !== "active" ? (
+            <Link to="/activar" className="mt-1 inline-block text-sm text-gold underline">
+              Activar plan
+            </Link>
+          ) : null}
         </Field>
         <Field label="WhatsApp del estudio">
           <input
@@ -257,10 +257,6 @@ export function Settings() {
               </Button>
             </Link>
           ) : null}
-          <p className="mt-3 text-xs text-paper/50">
-            Cobro real: VITE_MP_CHECKOUT_SELF_URL (49) y VITE_MP_CHECKOUT_SETUP_URL (149). Sin links,
-            se activa en este dispositivo.
-          </p>
         </div>
       </Card>
     </div>

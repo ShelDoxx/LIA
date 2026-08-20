@@ -147,25 +147,27 @@ export function readCheckoutSince(): string | undefined {
 
 /**
  * Abre MercadoPago según la opción.
- * Sin URL configurada: activa en local (dev/demo).
- * Con URL: NO activa hasta volver de pago / sync / operación.
+ * En producción: sin URL de checkout → no se activa gratis.
+ * Optimistic activate solo en DEV explícito.
  */
 export function startCheckout(
   choice: CheckoutChoice,
   onLocalActivate: (plan: SubscriptionPlan) => void,
-): "checkout" | "demo" {
+): "checkout" | "demo" | "unavailable" {
   const url = choice === "setup" ? checkoutSetupUrl() : checkoutSelfUrl();
+  const isProd = typeof import.meta !== "undefined" && Boolean(import.meta.env?.PROD);
   const optimistic =
+    !isProd &&
     typeof import.meta !== "undefined" &&
     import.meta.env?.VITE_CHECKOUT_OPTIMISTIC_ACTIVATE === "true";
 
   if (url) {
     if (optimistic) onLocalActivate(choice);
     rememberCheckout(choice);
-    // Misma pestaña: el back_url de MP vuelve a /activar con ?paid=1
     window.location.assign(url);
     return "checkout";
   }
+  if (isProd) return "unavailable";
   onLocalActivate(choice);
   return "demo";
 }
@@ -195,9 +197,17 @@ export async function confirmMercadoPagoPayment(
 ): Promise<{ ok: boolean; plan?: SubscriptionPlan; setupMeetPending?: boolean; error?: string }> {
   try {
     const { botUrl } = await import("@/lib/botBase");
+    const { getSessionToken } = await import("@/lib/authApi");
+    const token = getSessionToken();
+    if (!token) {
+      return { ok: false, error: "Iniciá sesión para activar el plan con tu pago" };
+    }
     const res = await fetch(botUrl("/billing/confirm"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
       body: JSON.stringify({ operationId, plan }),
     });
     const data = (await res.json().catch(() => ({}))) as {

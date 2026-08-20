@@ -196,6 +196,7 @@ type LiaContextValue = {
   signedIn: boolean;
   isAdmin: boolean;
   entitlementStatus: "none" | "trial" | "active" | "expired" | null;
+  refreshEntitlement: () => Promise<void>;
   signIn: (name?: string, email?: string, plan?: "demo" | "estudio") => Promise<void>;
   signInWithGoogle: (plan?: "demo" | "estudio") => Promise<void>;
   requestEmailOtp: (email: string, name?: string) => Promise<{ ok: boolean; error?: string; devCode?: string }>;
@@ -319,6 +320,26 @@ export function LiaProvider({ children }: { children: ReactNode }) {
                   status: "active",
                   startedAt: finalState.producer.subscription?.startedAt || new Date().toISOString(),
                   plan: me.entitlement.plan,
+                },
+              },
+            };
+          }
+          // Servidor no activo → no confiar en unlock local (excepto demo)
+          if (
+            !me.isAdmin &&
+            finalState.producer.plan === "estudio" &&
+            me.entitlement?.status !== "active" &&
+            me.entitlement?.status !== "trial" &&
+            finalState.producer.subscription?.status === "active"
+          ) {
+            finalState = {
+              ...finalState,
+              producer: {
+                ...finalState.producer,
+                subscription: {
+                  ...finalState.producer.subscription,
+                  status: "expired",
+                  setupMeetPending: false,
                 },
               },
             };
@@ -478,6 +499,16 @@ export function LiaProvider({ children }: { children: ReactNode }) {
       signedIn,
       isAdmin,
       entitlementStatus,
+      refreshEntitlement: async () => {
+        const me = await fetchAuthMe();
+        if (!me.ok) {
+          setEntitlementStatus(null);
+          setIsAdmin(false);
+          return;
+        }
+        setIsAdmin(me.isAdmin);
+        setEntitlementStatus(me.entitlement?.status ?? "none");
+      },
       isProcessingMedia,
       signIn: async (name, email, plan) => {
         // Solo demo entra sin OTP. Estudio usa requestEmailOtp + verifyEmailOtp.
@@ -569,10 +600,10 @@ export function LiaProvider({ children }: { children: ReactNode }) {
         const cred = await signInWithPopup(auth, new GoogleAuthProvider());
         const user = cred.user;
         if (!user.email) throw new Error("Google no devolvió email");
+        const idToken = await user.getIdToken();
         const sess = await sessionFromGoogle({
-          email: user.email,
+          idToken,
           name: user.displayName ?? undefined,
-          firebaseUid: user.uid,
         });
         if (!sess.ok) throw new Error(sess.error || "No se pudo crear sesión");
 
@@ -584,6 +615,7 @@ export function LiaProvider({ children }: { children: ReactNode }) {
             ...next,
             producer: {
               ...next.producer,
+              id: user.uid,
               name: user.displayName ?? next.producer.name,
               email: user.email,
               firebaseUid: user.uid,
@@ -596,6 +628,7 @@ export function LiaProvider({ children }: { children: ReactNode }) {
             ...current,
             producer: {
               ...current.producer,
+              id: user.uid,
               name: user.displayName ?? current.producer.name,
               email: user.email,
               firebaseUid: user.uid,
@@ -605,6 +638,7 @@ export function LiaProvider({ children }: { children: ReactNode }) {
           };
         } else {
           next = estudioState({
+            id: user.uid,
             name: user.displayName ?? "Productor",
             email: user.email,
             firebaseUid: user.uid,

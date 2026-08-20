@@ -29,8 +29,10 @@ export async function loadStateFromCloud(producerId: string): Promise<LiaState |
 
 export async function saveStateToCloud(state: LiaState): Promise<boolean> {
   if (!firebaseEnabled || !db) return false;
+  const cloudId = state.producer.firebaseUid || state.producer.id;
+  if (!cloudId) return false;
   try {
-    await setDoc(cloudDocId(state.producer.id), {
+    await setDoc(cloudDocId(cloudId), {
       updatedAt: new Date().toISOString(),
       email: state.producer.email,
       state: slimForCloud(state),

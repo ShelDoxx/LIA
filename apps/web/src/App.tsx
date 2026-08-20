@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useLia } from "./context/LiaContext";
 import { Layout } from "./components/Layout";
 import { Login } from "./pages/Login";
@@ -45,6 +45,19 @@ function Guard({ children }: { children: React.ReactNode }) {
   return children;
 }
 
+/** Estudio sin entitlement activo solo puede estar en /activar (o admin). Demo libre. */
+function PaidGuard({ children }: { children: React.ReactNode }) {
+  const { state, entitlementStatus, isAdmin } = useLia();
+  const location = useLocation();
+  const path = location.pathname;
+  if (state?.producer.plan === "demo") return children;
+  if (isAdmin) return children;
+  if (entitlementStatus === "active" || entitlementStatus === "trial") return children;
+  if (path === "/activar" || path.startsWith("/activar")) return children;
+  if (path === "/admin" || path.startsWith("/admin")) return children;
+  return <Navigate to="/activar" replace />;
+}
+
 export default function App() {
   const { signedIn } = useLia();
   return (
@@ -55,7 +68,9 @@ export default function App() {
         path="/"
         element={
           <Guard>
-            <Layout />
+            <PaidGuard>
+              <Layout />
+            </PaidGuard>
           </Guard>
         }
       >

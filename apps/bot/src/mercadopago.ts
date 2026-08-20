@@ -12,9 +12,11 @@ export function verifyMpWebhookSignature(opts: {
   xSignature?: string;
   xRequestId?: string;
   dataId?: string;
+  /** En producción: sin secret = firma inválida (fail closed). */
+  requireSecret?: boolean;
 }): boolean {
-  const { secret, xSignature, xRequestId, dataId } = opts;
-  if (!secret) return true; // sin secret configurado, no bloqueamos (dev)
+  const { secret, xSignature, xRequestId, dataId, requireSecret } = opts;
+  if (!secret) return !requireSecret; // dev sin secret OK; prod falla
   if (!xSignature) return false;
 
   const parts: Record<string, string> = {};
@@ -47,6 +49,8 @@ export type BillingActivation = {
   id: string;
   plan: BillingPlan;
   status: "active" | "cancelled" | "pending";
+  /** Usuario Lía que reclamó el pago (un pago = una cuenta). */
+  userId?: string;
   email?: string;
   externalReference?: string;
   mpPaymentId?: string;
@@ -93,6 +97,14 @@ function detectPlan(amount?: number, ref?: string): BillingPlan {
     return "self";
   }
   return "self";
+}
+
+/** Prioriza monto/referencia de MP; el claim del cliente solo empatando sin monto. */
+function resolvePlan(amount?: number, ref?: string, claimed?: BillingPlan): BillingPlan {
+  if (typeof amount === "number" || (ref && ref.trim())) {
+    return detectPlan(amount, ref);
+  }
+  return claimed ?? detectPlan(amount, ref);
 }
 
 /** Solo plata acreditada. cancelled / rejected / pending / refunded = no. */
@@ -335,6 +347,8 @@ export async function confirmByOperationId(opts: {
   operationId: string;
   accessToken: string;
   claimedPlan?: BillingPlan;
+  /** Usuario autenticado que reclama el pago. */
+  userId?: string;
 }): Promise<{ ok: boolean; activation?: BillingActivation; detail?: string }> {
   const raw = opts.operationId.trim();
   const id = raw.replace(/\D/g, "");
@@ -346,7 +360,14 @@ export async function confirmByOperationId(opts: {
 
   const used = alreadyUsed(id || maybeUuid);
   if (used) {
-    // Un pago = una cuenta. Evita que Felipe y Fernando activen con el mismo cobro.
+    // Mismo usuario reconfirma → OK. Activación huérfana (sin userId) → se vincula una sola vez.
+    if (opts.userId && (!used.userId || used.userId === opts.userId)) {
+      if (!used.userId) {
+        used.userId = opts.userId;
+        upsert(used);
+      }
+      return { ok: true, activation: used, detail: "already_active" };
+    }
     return {
       ok: false,
       detail:
@@ -379,13 +400,16 @@ export async function confirmByOperationId(opts: {
         };
       }
       const amount = data.transaction_amount;
-      const plan =
-        opts.claimedPlan ??
-        detectPlan(amount, `${data.external_reference ?? ""} ${data.description ?? ""}`);
+      const plan = resolvePlan(
+        amount,
+        `${data.external_reference ?? ""} ${data.description ?? ""}`,
+        opts.claimedPlan,
+      );
       const activation: BillingActivation = {
         id: crypto.randomUUID(),
         plan,
         status: "active",
+        userId: opts.userId,
         email: data.payer?.email,
         externalReference: data.external_reference,
         mpPaymentId: String(data.id ?? id),
@@ -425,11 +449,12 @@ export async function confirmByOperationId(opts: {
         };
       }
       const amount = data.transaction_amount;
-      const plan = opts.claimedPlan ?? detectPlan(amount);
+      const plan = resolvePlan(amount, undefined, opts.claimedPlan);
       const activation: BillingActivation = {
         id: crypto.randomUUID(),
         plan,
         status: "active",
+        userId: opts.userId,
         mpPaymentId: String(data.payment?.id ?? data.id ?? id),
         mpPreapprovalId: data.preapproval_id,
         amount,
@@ -475,13 +500,16 @@ export async function confirmByOperationId(opts: {
           };
         }
         const amount = charge.amount ?? data.auto_recurring?.transaction_amount;
-        const plan =
-          opts.claimedPlan ??
-          detectPlan(amount, `${data.external_reference ?? ""} ${data.reason ?? ""}`);
+        const plan = resolvePlan(
+          amount,
+          `${data.external_reference ?? ""} ${data.reason ?? ""}`,
+          opts.claimedPlan,
+        );
         const activation: BillingActivation = {
           id: crypto.randomUUID(),
           plan,
           status: "active",
+          userId: opts.userId,
           email: data.payer_email,
           externalReference: data.external_reference,
           mpPreapprovalId: String(data.id ?? preId),
@@ -516,6 +544,7 @@ export async function syncRecentApprovals(opts: {
   plan?: BillingPlan;
   sinceIso?: string;
   operationId?: string;
+  userId?: string;
 }): Promise<{ ok: boolean; activation?: BillingActivation; detail?: string }> {
   const op = (opts.operationId ?? "").trim();
   if (!op) {
@@ -529,5 +558,6 @@ export async function syncRecentApprovals(opts: {
     operationId: op,
     accessToken: opts.accessToken,
     claimedPlan: opts.plan,
+    userId: opts.userId,
   });
 }

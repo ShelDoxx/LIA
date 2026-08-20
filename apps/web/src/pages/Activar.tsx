@@ -34,7 +34,7 @@ function clearPendingPlan() {
 }
 
 export function Activar() {
-  const { state, save } = useLia();
+  const { state, save, refreshEntitlement } = useLia();
   const [params] = useSearchParams();
   const sub = state.producer.subscription;
   const meetPending = sub?.status === "active" && sub.setupMeetPending;
@@ -45,10 +45,10 @@ export function Activar() {
   const [err, setErr] = useState("");
   const autoTried = useRef(false);
 
-  function applyActivation(plan: SubscriptionPlan, setupMeetPending?: boolean) {
+  async function applyActivation(plan: SubscriptionPlan, setupMeetPending?: boolean) {
     clearPendingPlan();
     setPendingPlan(null);
-    void save({
+    await save({
       ...state,
       producer: {
         ...state.producer,
@@ -62,6 +62,7 @@ export function Activar() {
         ),
       },
     });
+    await refreshEntitlement();
     setMsg(plan === "setup" ? "Pago verificado. Plan activo — coordiná el meet." : "Pago verificado. Plan Self activo.");
     setErr("");
   }
