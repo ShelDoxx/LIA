@@ -137,7 +137,23 @@ export function Activar() {
                 Ya pagué — activar plan
               </Button>
             </Card>
-          ) : null}
+          ) : (
+            <Card className="border-line p-5">
+              <p className="font-medium text-forest">¿Ya pagaste y seguís bloqueado?</p>
+              <p className="mt-1 text-sm text-ink-soft">
+                Mercado Pago aprobó el pago pero a veces el aviso no llega. Activá acá según lo que
+                pagaste.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button variant="ghost" onClick={() => onActivate("self")}>
+                  Activar Self (49)
+                </Button>
+                <Button variant="gold" onClick={() => onActivate("setup")}>
+                  Activar Setup (149)
+                </Button>
+              </div>
+            </Card>
+          )}
           <CheckoutPlans producerName={state.producer.name} onActivate={onActivate} />
         </>
       )}
