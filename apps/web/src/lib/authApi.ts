@@ -143,6 +143,7 @@ export async function fetchAdminUsers() {
       createdAt: string;
       lastLoginAt: string;
       entitlement: LiaEntitlement;
+      isAdmin?: boolean;
     }>;
     emailConfigured?: boolean;
     emailDevMode?: boolean;

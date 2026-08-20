@@ -193,7 +193,10 @@ app.get("/auth/admin/users", (req, res) => {
   }
   res.json({
     ok: true,
-    users: listUsers(),
+    users: listUsers().map((u) => ({
+      ...u,
+      isAdmin: config.adminEmails.includes(u.email),
+    })),
     emailConfigured: Boolean(config.resendApiKey),
     emailDevMode: config.emailDevMode && !config.resendApiKey,
   });

@@ -17,6 +17,7 @@ type AdminUser = {
   createdAt: string;
   lastLoginAt: string;
   entitlement: LiaEntitlement;
+  isAdmin?: boolean;
 };
 
 function fmt(iso: string) {
@@ -71,14 +72,16 @@ export function Admin({ mode = "home" }: Props) {
     void load();
   }, [load]);
 
+  const customers = useMemo(() => users.filter((u) => !u.isAdmin), [users]);
+
   const stats = useMemo(() => {
-    const active = users.filter((u) => u.entitlement.status === "active").length;
-    const pending = users.filter((u) => u.entitlement.status === "none").length;
-    const suspended = users.filter(
+    const active = customers.filter((u) => u.entitlement.status === "active").length;
+    const pending = customers.filter((u) => u.entitlement.status === "none").length;
+    const suspended = customers.filter(
       (u) => u.entitlement.status === "expired" || u.entitlement.status === "trial",
     ).length;
-    return { total: users.length, active, pending, suspended };
-  }, [users]);
+    return { total: customers.length, active, pending, suspended };
+  }, [customers]);
 
   if (!isAdmin) return <Navigate to="/" replace />;
 
@@ -187,12 +190,14 @@ export function Admin({ mode = "home" }: Props) {
             <Card className="p-6">
               <p className="text-sm text-ink-soft">Cargando usuarios…</p>
             </Card>
-          ) : users.length === 0 ? (
+          ) : customers.length === 0 ? (
             <Card className="p-6">
-              <p className="text-sm text-ink-soft">Todavía no hay usuarios registrados.</p>
+              <p className="text-sm text-ink-soft">
+                Todavía no hay productores registrados (los admins no aparecen acá).
+              </p>
             </Card>
           ) : (
-            users.map((u) => (
+            customers.map((u) => (
               <Card key={u.id} className="p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
