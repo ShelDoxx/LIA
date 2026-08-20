@@ -95,9 +95,54 @@ function detectPlan(amount?: number, ref?: string): BillingPlan {
   return "self";
 }
 
+/** Solo plata acreditada. cancelled / rejected / pending / refunded = no. */
+function isPaymentApproved(status?: string): boolean {
+  return (status ?? "").toLowerCase() === "approved";
+}
+
+function isDeadPaymentStatus(status?: string): boolean {
+  const s = (status ?? "").toLowerCase();
+  return (
+    s === "cancelled" ||
+    s === "canceled" ||
+    s === "rejected" ||
+    s === "refunded" ||
+    s === "charged_back" ||
+    s === "cancelled_by_timeout"
+  );
+}
+
+async function findApprovedChargeForPreapproval(
+  preId: string,
+  accessToken: string,
+): Promise<{ paymentId?: string; amount?: number } | null> {
+  const res = await fetch(
+    `https://api.mercadopago.com/authorized_payments/search?preapproval_id=${encodeURIComponent(preId)}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (!res.ok) return null;
+  const data = (await res.json()) as {
+    results?: Array<{
+      payment?: { id?: number; status?: string };
+      transaction_amount?: number;
+      status?: string;
+    }>;
+  };
+  for (const row of data.results ?? []) {
+    if (isPaymentApproved(row.payment?.status)) {
+      return {
+        paymentId: row.payment?.id ? String(row.payment.id) : undefined,
+        amount: row.transaction_amount,
+      };
+    }
+  }
+  return null;
+}
+
 /**
  * Procesa notificaciones de Mercado Pago (webhooks / IPN).
  * Acepta topic+id clásico o body JSON de webhooks nuevos.
+ * Regla dura: status "active" en Lía SOLO con pago approved.
  */
 export async function handleMercadoPagoNotification(opts: {
   topic?: string;
@@ -138,7 +183,22 @@ export async function handleMercadoPagoNotification(opts: {
     };
     const amount = data.auto_recurring?.transaction_amount;
     const plan = detectPlan(amount, data.external_reference);
-    const status = data.status === "authorized" || data.status === "active" ? "active" : "pending";
+    const preStatus = (data.status ?? "").toLowerCase();
+    // cancelled / paused → never active
+    let status: BillingActivation["status"] = "pending";
+    let paymentId: string | undefined;
+    if (preStatus === "cancelled" || preStatus === "paused") {
+      status = "cancelled";
+    } else if (preStatus === "authorized" || preStatus === "active") {
+      const charge = await findApprovedChargeForPreapproval(String(data.id ?? id), accessToken);
+      if (charge) {
+        status = "active";
+        paymentId = charge.paymentId;
+      } else {
+        status = "pending";
+        console.log("[mp] preapproval sin cobro approved — no activo", data.id ?? id, preStatus);
+      }
+    }
     const activation: BillingActivation = {
       id: crypto.randomUUID(),
       plan,
@@ -146,6 +206,7 @@ export async function handleMercadoPagoNotification(opts: {
       email: data.payer_email,
       externalReference: data.external_reference,
       mpPreapprovalId: String(data.id ?? id),
+      mpPaymentId: paymentId,
       amount,
       currency: data.auto_recurring?.currency_id,
       setupMeetPending: plan === "setup" && status === "active",
@@ -177,10 +238,12 @@ export async function handleMercadoPagoNotification(opts: {
       reason?: string;
       payment?: { id?: number; status?: string };
     };
-    const payStatus = data.payment?.status ?? data.status;
+    const payStatus = data.payment?.status;
     const amount = data.transaction_amount;
     const plan = detectPlan(amount, data.reason);
-    const status = payStatus === "approved" || data.status === "processed" ? "active" : "pending";
+    let status: BillingActivation["status"] = "pending";
+    if (isPaymentApproved(payStatus)) status = "active";
+    else if (isDeadPaymentStatus(payStatus) || isDeadPaymentStatus(data.status)) status = "cancelled";
     const activation: BillingActivation = {
       id: crypto.randomUUID(),
       plan,
@@ -195,7 +258,7 @@ export async function handleMercadoPagoNotification(opts: {
       rawType: topic,
     };
     upsert(activation);
-    console.log("[mp] authorized_payment", status, plan, amount, id);
+    console.log("[mp] authorized_payment", status, plan, amount, payStatus, id);
     return { ok: true, activation };
   }
 
@@ -217,7 +280,9 @@ export async function handleMercadoPagoNotification(opts: {
     };
     const amount = data.transaction_amount;
     const plan = detectPlan(amount, `${data.external_reference ?? ""} ${data.description ?? ""}`);
-    const status = data.status === "approved" ? "active" : "pending";
+    let status: BillingActivation["status"] = "pending";
+    if (isPaymentApproved(data.status)) status = "active";
+    else if (isDeadPaymentStatus(data.status)) status = "cancelled";
     const activation: BillingActivation = {
       id: crypto.randomUUID(),
       plan,
@@ -233,7 +298,7 @@ export async function handleMercadoPagoNotification(opts: {
       rawType: topic,
     };
     upsert(activation);
-    console.log("[mp] payment", status, plan, amount, data.payer?.email ?? id);
+    console.log("[mp] payment", status, plan, amount, data.status, data.payer?.email ?? id);
     return { ok: true, activation };
   }
 
@@ -345,13 +410,13 @@ export async function confirmByOperationId(opts: {
         preapproval_id?: string;
         payment?: { id?: number; status?: string; status_detail?: string };
       };
-      const payStatus = data.payment?.status ?? data.status;
-      if (payStatus !== "approved" && data.status !== "processed") {
+      const payStatus = data.payment?.status;
+      if (!isPaymentApproved(payStatus)) {
         return {
           ok: false,
           detail: `Mercado Pago no cobró la suscripción (estado: ${payStatus ?? data.status}${
             data.rejection_code ? ` · ${data.rejection_code}` : ""
-          }). Sin cobro aprobado no se activa.`,
+          }). Sin cobro approved no se activa.`,
         };
       }
       const amount = data.transaction_amount;
@@ -393,18 +458,18 @@ export async function confirmByOperationId(opts: {
         if (data.status !== "authorized" && data.status !== "active") {
           return {
             ok: false,
-            detail: `La suscripción está en estado "${data.status ?? "desconocido"}" (hace falta authorized/active).`,
+            detail: `La suscripción está en estado "${data.status ?? "desconocido"}". Cancelada/pausada no activa.`,
           };
         }
-        // Exigir al menos un cobro si MP lo reporta
-        const charged = data.summarized?.charged_quantity;
-        if (charged === 0) {
+        // Obligatorio: cobro approved (no alcanza authorized sin plata)
+        const charge = await findApprovedChargeForPreapproval(String(data.id ?? preId), opts.accessToken);
+        if (!charge) {
           return {
             ok: false,
-            detail: "La suscripción existe pero aún no hay cobro acreditado.",
+            detail: "La suscripción existe pero no hay cobro approved. Cancelado/rechazado no activa.",
           };
         }
-        const amount = data.auto_recurring?.transaction_amount;
+        const amount = charge.amount ?? data.auto_recurring?.transaction_amount;
         const plan =
           opts.claimedPlan ??
           detectPlan(amount, `${data.external_reference ?? ""} ${data.reason ?? ""}`);
@@ -415,6 +480,7 @@ export async function confirmByOperationId(opts: {
           email: data.payer_email,
           externalReference: data.external_reference,
           mpPreapprovalId: String(data.id ?? preId),
+          mpPaymentId: charge.paymentId,
           amount,
           currency: data.auto_recurring?.currency_id,
           setupMeetPending: plan === "setup",
@@ -489,7 +555,7 @@ export async function syncRecentApprovals(opts: {
             }>;
           };
           for (const row of apData.results ?? []) {
-            if (row.payment?.status === "approved" || row.status === "processed") {
+            if (isPaymentApproved(row.payment?.status)) {
               chargedOk = true;
               paymentId = row.payment?.id ? String(row.payment.id) : undefined;
               amount = row.transaction_amount ?? amount;
