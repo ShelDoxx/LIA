@@ -158,7 +158,48 @@ export async function handleMercadoPagoNotification(opts: {
     return { ok: true, activation };
   }
 
-  if (topicNorm.includes("payment") || topicNorm === "subscription_authorized_payment") {
+  if (
+    topicNorm.includes("authorized_payment") ||
+    topicNorm === "subscription_authorized_payment"
+  ) {
+    if (!id && body?.data) id = String((body.data as { id?: string }).id ?? "");
+    if (!id) return { ok: false, detail: "falta id authorized_payment" };
+    const res = await fetch(`https://api.mercadopago.com/authorized_payments/${id}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return { ok: false, detail: `authorized_payment ${res.status}` };
+    const data = (await res.json()) as {
+      id?: number;
+      status?: string;
+      transaction_amount?: number;
+      currency_id?: string;
+      preapproval_id?: string;
+      reason?: string;
+      payment?: { id?: number; status?: string };
+    };
+    const payStatus = data.payment?.status ?? data.status;
+    const amount = data.transaction_amount;
+    const plan = detectPlan(amount, data.reason);
+    const status = payStatus === "approved" || data.status === "processed" ? "active" : "pending";
+    const activation: BillingActivation = {
+      id: crypto.randomUUID(),
+      plan,
+      status,
+      mpPaymentId: String(data.payment?.id ?? data.id ?? id),
+      mpPreapprovalId: data.preapproval_id,
+      amount,
+      currency: data.currency_id,
+      setupMeetPending: plan === "setup" && status === "active",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      rawType: topic,
+    };
+    upsert(activation);
+    console.log("[mp] authorized_payment", status, plan, amount, id);
+    return { ok: true, activation };
+  }
+
+  if (topicNorm.includes("payment") && !topicNorm.includes("authorized")) {
     if (!id && body?.data) id = String((body.data as { id?: string }).id ?? "");
     if (!id) return { ok: false, detail: "falta id payment" };
     const res = await fetch(`https://api.mercadopago.com/v1/payments/${id}`, {
@@ -172,9 +213,10 @@ export async function handleMercadoPagoNotification(opts: {
       currency_id?: string;
       external_reference?: string;
       payer?: { email?: string };
+      description?: string;
     };
     const amount = data.transaction_amount;
-    const plan = detectPlan(amount, data.external_reference);
+    const plan = detectPlan(amount, `${data.external_reference ?? ""} ${data.description ?? ""}`);
     const status = data.status === "approved" ? "active" : "pending";
     const activation: BillingActivation = {
       id: crypto.randomUUID(),
@@ -391,5 +433,119 @@ export async function confirmByOperationId(opts: {
     ok: false,
     detail:
       "No encontramos ese ID en Mercado Pago. Revisá el número de operación de la pantalla de éxito (pago aprobado).",
+  };
+}
+
+/**
+ * Tras volver del checkout (back_url), busca cobros/suscripciones recientes
+ * aprobados en MP y los marca activos en Lía.
+ */
+export async function syncRecentApprovals(opts: {
+  accessToken: string;
+  plan?: BillingPlan;
+  sinceIso?: string;
+}): Promise<{ ok: boolean; activation?: BillingActivation; detail?: string }> {
+  if (!opts.accessToken) return { ok: false, detail: "MP_ACCESS_TOKEN no configurado" };
+  const headers = { Authorization: `Bearer ${opts.accessToken}` };
+  const sinceMs = opts.sinceIso ? Date.parse(opts.sinceIso) : Date.now() - 30 * 60_000;
+  const since = Number.isFinite(sinceMs) ? sinceMs : Date.now() - 30 * 60_000;
+
+  // 1) Suscripciones recientes
+  const preRes = await fetch("https://api.mercadopago.com/preapproval/search?limit=20", {
+    headers,
+  });
+  if (preRes.ok) {
+    const preData = (await preRes.json()) as {
+      results?: Array<{
+        id?: string;
+        status?: string;
+        reason?: string;
+        date_created?: string;
+        payer_email?: string;
+        external_reference?: string;
+        auto_recurring?: { transaction_amount?: number; currency_id?: string };
+      }>;
+    };
+    for (const pre of preData.results ?? []) {
+      const created = pre.date_created ? Date.parse(pre.date_created) : 0;
+      if (created && created < since - 60_000) continue;
+      if (pre.status !== "authorized" && pre.status !== "active") continue;
+
+      // Exigir cobro aprobado (no alcanza con adhesión pending/cancelled)
+      let chargedOk = false;
+      let paymentId: string | undefined;
+      let amount = pre.auto_recurring?.transaction_amount;
+      if (pre.id) {
+        const apRes = await fetch(
+          `https://api.mercadopago.com/authorized_payments/search?preapproval_id=${pre.id}`,
+          { headers },
+        );
+        if (apRes.ok) {
+          const apData = (await apRes.json()) as {
+            results?: Array<{
+              payment?: { id?: number; status?: string };
+              transaction_amount?: number;
+              status?: string;
+            }>;
+          };
+          for (const row of apData.results ?? []) {
+            if (row.payment?.status === "approved" || row.status === "processed") {
+              chargedOk = true;
+              paymentId = row.payment?.id ? String(row.payment.id) : undefined;
+              amount = row.transaction_amount ?? amount;
+              break;
+            }
+          }
+        }
+      }
+      if (!chargedOk) continue;
+
+      const plan =
+        opts.plan ??
+        detectPlan(amount, `${pre.external_reference ?? ""} ${pre.reason ?? ""}`);
+      if (paymentId) {
+        const used = alreadyUsed(paymentId);
+        if (used?.status === "active") return { ok: true, activation: used, detail: "already_active" };
+      }
+      if (pre.id) {
+        const usedPre = alreadyUsed(pre.id);
+        if (usedPre?.status === "active") {
+          return { ok: true, activation: usedPre, detail: "already_active" };
+        }
+      }
+
+      const activation: BillingActivation = {
+        id: crypto.randomUUID(),
+        plan,
+        status: "active",
+        email: pre.payer_email,
+        externalReference: pre.external_reference,
+        mpPaymentId: paymentId,
+        mpPreapprovalId: pre.id,
+        amount,
+        currency: pre.auto_recurring?.currency_id,
+        setupMeetPending: plan === "setup",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        rawType: "sync.preapproval",
+      };
+      upsert(activation);
+      console.log("[mp] sync preapproval", plan, pre.id);
+      return { ok: true, activation };
+    }
+  }
+
+  // 2) Ya guardadas por webhook
+  const recent = store.activations.find((a) => {
+    if (a.status !== "active") return false;
+    const t = Date.parse(a.updatedAt || a.createdAt);
+    return Number.isFinite(t) && t >= since - 60_000;
+  });
+  if (recent) return { ok: true, activation: recent, detail: "from_store" };
+
+  return {
+    ok: false,
+    detail:
+      "Todavía no vemos un cobro aprobado reciente. Si acabás de pagar, esperá unos segundos o pegá el número de operación.",
   };
 }

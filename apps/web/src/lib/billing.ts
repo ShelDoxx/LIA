@@ -128,10 +128,27 @@ export function setupMeetWhatsAppUrl(producerName?: string) {
 
 export type CheckoutChoice = "self" | "setup";
 
+function rememberCheckout(choice: CheckoutChoice) {
+  try {
+    sessionStorage.setItem("lia_checkout_plan", choice);
+    sessionStorage.setItem("lia_checkout_at", new Date().toISOString());
+  } catch {
+    /* ignore */
+  }
+}
+
+export function readCheckoutSince(): string | undefined {
+  try {
+    return sessionStorage.getItem("lia_checkout_at") || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Abre MercadoPago según la opción.
  * Sin URL configurada: activa en local (dev/demo).
- * Con URL: NO activa hasta volver de pago / webhook (salvo VITE_CHECKOUT_OPTIMISTIC_ACTIVATE=true).
+ * Con URL: NO activa hasta volver de pago / sync / operación.
  */
 export function startCheckout(
   choice: CheckoutChoice,
@@ -144,17 +161,31 @@ export function startCheckout(
 
   if (url) {
     if (optimistic) onLocalActivate(choice);
+    rememberCheckout(choice);
     window.open(url, "_blank", "noopener,noreferrer");
-    try {
-      sessionStorage.setItem("lia_checkout_plan", choice);
-      sessionStorage.setItem("lia_checkout_at", new Date().toISOString());
-    } catch {
-      /* ignore */
-    }
     return "checkout";
   }
   onLocalActivate(choice);
   return "demo";
+}
+
+/** Extrae IDs típicos del return URL de Mercado Pago. */
+export function extractMpReturnOperationId(params: URLSearchParams): string {
+  const keys = [
+    "payment_id",
+    "collection_id",
+    "preference_id",
+    "merchant_order_id",
+    "preapproval_id",
+    "op",
+    "operation",
+    "id",
+  ];
+  for (const k of keys) {
+    const v = params.get(k);
+    if (v && v !== "null" && v !== "undefined") return v;
+  }
+  return "";
 }
 
 export async function confirmMercadoPagoPayment(
@@ -176,6 +207,37 @@ export async function confirmMercadoPagoPayment(
     };
     if (!res.ok || !data.ok) {
       return { ok: false, error: data.error || "No se pudo confirmar el pago" };
+    }
+    return {
+      ok: true,
+      plan: data.plan ?? plan ?? "self",
+      setupMeetPending: data.setupMeetPending,
+    };
+  } catch {
+    return { ok: false, error: "No pude contactar al servidor de Lía" };
+  }
+}
+
+/** Tras back_url ?paid=1: busca cobro aprobado reciente en MP. */
+export async function syncAfterCheckout(
+  plan?: SubscriptionPlan,
+  since?: string,
+): Promise<{ ok: boolean; plan?: SubscriptionPlan; setupMeetPending?: boolean; error?: string }> {
+  try {
+    const { botUrl } = await import("@/lib/botBase");
+    const res = await fetch(botUrl("/billing/sync-after-checkout"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan, since: since || readCheckoutSince() }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      plan?: SubscriptionPlan;
+      setupMeetPending?: boolean;
+      error?: string;
+    };
+    if (!res.ok || !data.ok) {
+      return { ok: false, error: data.error || "Sin cobro aprobado todavía" };
     }
     return {
       ok: true,

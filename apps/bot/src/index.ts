@@ -25,6 +25,7 @@ import {
   findActivation,
   handleMercadoPagoNotification,
   listActivations,
+  syncRecentApprovals,
   verifyMpWebhookSignature,
 } from "./mercadopago.js";
 
@@ -254,6 +255,9 @@ app.get("/billing/checkout-config", (_req, res) => {
     selfUrl: config.mpCheckoutSelfUrl || "",
     setupUrl: config.mpCheckoutSetupUrl || "",
     mpConfigured: Boolean(config.mpAccessToken),
+    webhookUrl: config.mpWebhookPublicUrl,
+    backUrlSelf: `${config.mpBackUrlBase}?paid=1&plan=self`,
+    backUrlSetup: `${config.mpBackUrlBase}?paid=1&plan=setup`,
   });
 });
 
@@ -284,20 +288,58 @@ app.post("/billing/confirm", async (req, res) => {
   }
 });
 
+/**
+ * Tras volver de MP (back_url ?paid=1), busca un cobro aprobado reciente
+ * y activa. Público a propósito: el cobro debe existir en MP.
+ */
+app.post("/billing/sync-after-checkout", async (req, res) => {
+  const plan = req.body?.plan === "setup" ? "setup" : req.body?.plan === "self" ? "self" : undefined;
+  const sinceIso = typeof req.body?.since === "string" ? req.body.since : undefined;
+  try {
+    const result = await syncRecentApprovals({
+      accessToken: config.mpAccessToken,
+      plan,
+      sinceIso,
+    });
+    if (!result.ok || !result.activation || result.activation.status !== "active") {
+      res.status(404).json({ ok: false, error: result.detail || "Sin cobro aprobado todavía" });
+      return;
+    }
+    res.json({
+      ok: true,
+      plan: result.activation.plan,
+      setupMeetPending: result.activation.setupMeetPending,
+      detail: result.detail,
+    });
+  } catch (err) {
+    console.error("[mp] sync-after-checkout", err);
+    res.status(500).json({ ok: false, error: "Error al sincronizar con Mercado Pago" });
+  }
+});
+
 app.get("/billing/activations", requireLiaSecret, (_req, res) => {
   res.json({ activations: listActivations() });
 });
 
-app.get("/billing/status", requireLiaSecret, (req, res) => {
+/** Público: estado por ref (si el checkout guardó external_reference). */
+app.get("/billing/status", (req, res) => {
   const email = String(req.query.email ?? "");
   const externalReference = String(req.query.ref ?? "");
+  if (!email && !externalReference) {
+    res.status(400).json({ ok: false, error: "ref o email requerido" });
+    return;
+  }
   const hit = findActivation({
     email: email || undefined,
     externalReference: externalReference || undefined,
   });
-  res.json({ ok: true, activation: hit ?? null });
+  res.json({
+    ok: true,
+    active: hit?.status === "active",
+    plan: hit?.plan,
+    setupMeetPending: hit?.setupMeetPending,
+  });
 });
-
 app.get("/public/policy/:id", (req, res) => {
   const p = policyById(req.params.id);
   if (!p) {
