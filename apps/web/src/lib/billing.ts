@@ -222,7 +222,7 @@ export async function confirmMercadoPagoPayment(
 /** Tras back_url: solo con operationId (nunca “último cobro reciente”). */
 export async function syncAfterCheckout(
   plan?: SubscriptionPlan,
-  since?: string,
+  _since?: string,
   operationId?: string,
 ): Promise<{ ok: boolean; plan?: SubscriptionPlan; setupMeetPending?: boolean; error?: string }> {
   const op = (operationId || "").trim();
