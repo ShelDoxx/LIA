@@ -2,6 +2,7 @@ import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useLia } from "./context/LiaContext";
 import { Layout } from "./components/Layout";
+import { AdminLayout } from "./components/AdminLayout";
 import { Login } from "./pages/Login";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 
@@ -45,7 +46,7 @@ function Guard({ children }: { children: React.ReactNode }) {
   return children;
 }
 
-/** Estudio sin entitlement activo solo puede estar en /activar (o admin). Demo libre. */
+/** Estudio sin entitlement activo solo /activar. Demo y admin libres. */
 function PaidGuard({ children }: { children: React.ReactNode }) {
   const { state, entitlementStatus, isAdmin } = useLia();
   const location = useLocation();
@@ -54,16 +55,39 @@ function PaidGuard({ children }: { children: React.ReactNode }) {
   if (isAdmin) return children;
   if (entitlementStatus === "active" || entitlementStatus === "trial") return children;
   if (path === "/activar" || path.startsWith("/activar")) return children;
-  if (path === "/admin" || path.startsWith("/admin")) return children;
   return <Navigate to="/activar" replace />;
 }
 
+function AdminHome() {
+  return <Admin mode="home" />;
+}
+
+function AdminUsers() {
+  return <Admin mode="users" />;
+}
+
 export default function App() {
-  const { signedIn } = useLia();
+  const { signedIn, isAdmin } = useLia();
   return (
     <Routes>
-      <Route path="/entrar" element={signedIn ? <Navigate to="/" replace /> : <Login />} />
+      <Route
+        path="/entrar"
+        element={signedIn ? <Navigate to={isAdmin ? "/admin" : "/"} replace /> : <Login />}
+      />
       <Route path="/c/:policyId/:kind" element={<Lazy><PublicDoc /></Lazy>} />
+
+      <Route
+        path="/admin"
+        element={
+          <Guard>
+            <AdminLayout />
+          </Guard>
+        }
+      >
+        <Route index element={<Lazy><AdminHome /></Lazy>} />
+        <Route path="usuarios" element={<Lazy><AdminUsers /></Lazy>} />
+      </Route>
+
       <Route
         path="/"
         element={
@@ -88,10 +112,12 @@ export default function App() {
         <Route path="emergencias" element={<Lazy><Emergencias /></Lazy>} />
         <Route path="ajustes" element={<Lazy><Settings /></Lazy>} />
         <Route path="activar" element={<Lazy><Activar /></Lazy>} />
-        <Route path="admin" element={<Lazy><Admin /></Lazy>} />
         <Route path="expediente" element={<Lazy><PdfPack /></Lazy>} />
       </Route>
-      <Route path="*" element={<Navigate to={signedIn ? "/" : "/entrar"} replace />} />
+      <Route
+        path="*"
+        element={<Navigate to={signedIn ? (isAdmin ? "/admin" : "/") : "/entrar"} replace />}
+      />
     </Routes>
   );
 }

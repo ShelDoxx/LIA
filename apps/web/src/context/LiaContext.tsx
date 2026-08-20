@@ -204,7 +204,7 @@ type LiaContextValue = {
     email: string,
     code: string,
     name?: string,
-  ) => Promise<{ ok: boolean; error?: string }>;
+  ) => Promise<{ ok: boolean; error?: string; isAdmin?: boolean }>;
   signOut: () => Promise<void>;
   save: (next: LiaState) => Promise<void>;
   restoreState: (next: LiaState) => Promise<void>;
@@ -287,92 +287,110 @@ export function LiaProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const next = await hydrateState();
-      const authFlag = await hydrateAuth();
-      if (cancelled) return;
+      try {
+        const next = await hydrateState();
+        const authFlag = await hydrateAuth();
+        if (cancelled) return;
 
-      let finalState = next;
-      let allowIn = Boolean(authFlag);
+        let finalState = next;
+        let allowIn = Boolean(authFlag);
 
-      if (authFlag) {
-        // Estudio exige sesión OTP/Google en el bot; demo puede usar solo flag local
-        const me = await fetchAuthMe();
-        if (me.ok) {
-          setIsAdmin(me.isAdmin);
-          setEntitlementStatus(me.entitlement?.status ?? "none");
-          finalState = {
-            ...finalState,
-            producer: {
-              ...finalState.producer,
-              liaUserId: me.user.id,
-              email: me.user.email || finalState.producer.email,
-              name: finalState.producer.name || me.user.name,
-            },
-          };
-          // Si el bot dice active y local no, alinear paywall local
-          if (me.entitlement?.status === "active" && finalState.producer.subscription?.status !== "active") {
+        if (authFlag) {
+          // Estudio exige sesión OTP/Google en el bot; demo puede usar solo flag local
+          const me = await fetchAuthMe();
+          if (me.ok) {
+            setIsAdmin(me.isAdmin);
+            setEntitlementStatus(me.entitlement?.status ?? "none");
             finalState = {
               ...finalState,
               producer: {
                 ...finalState.producer,
-                plan: "estudio",
-                subscription: {
-                  status: "active",
-                  startedAt: finalState.producer.subscription?.startedAt || new Date().toISOString(),
-                  plan: me.entitlement.plan,
-                },
+                liaUserId: me.user.id,
+                email: me.user.email || finalState.producer.email,
+                name: finalState.producer.name || me.user.name,
               },
             };
-          }
-          // Servidor no activo → no confiar en unlock local (excepto demo)
-          if (
-            !me.isAdmin &&
-            finalState.producer.plan === "estudio" &&
-            me.entitlement?.status !== "active" &&
-            me.entitlement?.status !== "trial" &&
-            finalState.producer.subscription?.status === "active"
-          ) {
-            finalState = {
-              ...finalState,
-              producer: {
-                ...finalState.producer,
-                subscription: {
-                  ...finalState.producer.subscription,
-                  status: "expired",
-                  setupMeetPending: false,
+            // Si el bot dice active y local no, alinear paywall local
+            if (me.entitlement?.status === "active" && finalState.producer.subscription?.status !== "active") {
+              finalState = {
+                ...finalState,
+                producer: {
+                  ...finalState.producer,
+                  plan: "estudio",
+                  subscription: {
+                    status: "active",
+                    startedAt: finalState.producer.subscription?.startedAt || new Date().toISOString(),
+                    plan: me.entitlement.plan,
+                  },
                 },
-              },
-            };
+              };
+            }
+            // Servidor no activo → no confiar en unlock local (excepto demo)
+            if (
+              !me.isAdmin &&
+              finalState.producer.plan === "estudio" &&
+              me.entitlement?.status !== "active" &&
+              me.entitlement?.status !== "trial" &&
+              finalState.producer.subscription?.status === "active"
+            ) {
+              finalState = {
+                ...finalState,
+                producer: {
+                  ...finalState.producer,
+                  subscription: {
+                    ...finalState.producer.subscription,
+                    status: "expired",
+                    setupMeetPending: false,
+                  },
+                },
+              };
+            }
+          } else if (finalState.producer.plan === "estudio") {
+            // Sesión local sin token válido → sacar
+            allowIn = false;
+            await del(AUTH_KEY);
+            await logoutSession();
+            setIsAdmin(false);
+            setEntitlementStatus(null);
           }
-        } else if (finalState.producer.plan === "estudio") {
-          // Sesión local sin token válido → sacar
-          allowIn = false;
-          await del(AUTH_KEY);
-          await logoutSession();
-          setIsAdmin(false);
-          setEntitlementStatus(null);
         }
-      }
 
-      if (allowIn) {
-        const { state: afterDaily, outbound } = runDailyAutomations(finalState);
-        finalState = afterDaily;
-        const health = await fetchBotHealth();
-        if (health.ok !== finalState.bot.connected) {
-          finalState = { ...finalState, bot: { ...finalState.bot, connected: health.ok } };
+        if (allowIn) {
+          try {
+            const { state: afterDaily, outbound } = runDailyAutomations(finalState);
+            finalState = afterDaily;
+            const health = await fetchBotHealth();
+            if (health.ok !== finalState.bot.connected) {
+              finalState = { ...finalState, bot: { ...finalState.bot, connected: health.ok } };
+            }
+            if (finalState.bot.metaAccessToken || finalState.bot.metaPhoneNumberId) {
+              await pushMetaConfigToBot(finalState.bot);
+            }
+            finalState = await withWhatsAppOutbound(finalState, outbound);
+            finalState = await pullPendingBotDocs(finalState);
+            await persist(finalState);
+          } catch (err) {
+            console.error("[lia] hydrate side-effects", err);
+            await persist(finalState);
+          }
         }
-        if (finalState.bot.metaAccessToken || finalState.bot.metaPhoneNumberId) {
-          await pushMetaConfigToBot(finalState.bot);
-        }
-        finalState = await withWhatsAppOutbound(finalState, outbound);
-        finalState = await pullPendingBotDocs(finalState);
-        await persist(finalState);
-      }
 
-      if (cancelled) return;
-      setState(finalState);
-      setSignedIn(allowIn);
-      setReady(true);
+        if (cancelled) return;
+        setState(finalState);
+        setSignedIn(allowIn);
+      } catch (err) {
+        console.error("[lia] hydrate failed", err);
+        if (!cancelled) {
+          try {
+            setState(await hydrateState());
+          } catch {
+            /* keep previous */
+          }
+          setSignedIn(false);
+        }
+      } finally {
+        if (!cancelled) setReady(true);
+      }
     })();
     return () => {
       cancelled = true;
@@ -585,11 +603,11 @@ export function LiaProvider({ children }: { children: ReactNode }) {
         await persist(next);
         await set(AUTH_KEY, "1");
         setEntitlementStatus(r.entitlement?.status ?? "none");
-        setIsAdmin(false);
-        setSignedIn(true);
         const me = await fetchAuthMe();
-        if (me.ok) setIsAdmin(me.isAdmin);
-        return { ok: true };
+        const admin = Boolean(me.ok && me.isAdmin);
+        setIsAdmin(admin);
+        setSignedIn(true);
+        return { ok: true, isAdmin: admin };
       },
       signInWithGoogle: async (plan) => {
         const current = currentOf();

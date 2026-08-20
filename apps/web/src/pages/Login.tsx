@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Banknote, Camera, FileStack, HandCoins, HeartPulse, ShieldCheck, Clock3 } from "lucide-react";
 import { useLia } from "@/context/LiaContext";
 import { Button, Card, Field, inputClass } from "@/components/ui";
@@ -70,6 +71,7 @@ const FAQ = [
 
 export function Login() {
   const { signIn, signInWithGoogle, firebaseEnabled, requestEmailOtp, verifyEmailOtp } = useLia();
+  const navigate = useNavigate();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -109,7 +111,11 @@ export function Login() {
     setBusy(true);
     const r = await verifyEmailOtp(email, code.trim(), name || undefined);
     setBusy(false);
-    if (!r.ok) setErr(r.error || "Código inválido");
+    if (!r.ok) {
+      setErr(r.error || "Código inválido");
+      return;
+    }
+    navigate(r.isAdmin ? "/admin" : "/", { replace: true });
   }
 
   return (
