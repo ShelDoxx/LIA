@@ -21,6 +21,7 @@ const PdfPack = lazy(() => import("./pages/PdfPack").then((m) => ({ default: m.P
 const Siniestros = lazy(() => import("./pages/Siniestros").then((m) => ({ default: m.Siniestros })));
 const PublicDoc = lazy(() => import("./pages/PublicDoc").then((m) => ({ default: m.PublicDoc })));
 const Activar = lazy(() => import("./pages/Activar").then((m) => ({ default: m.Activar })));
+const Admin = lazy(() => import("./pages/Admin").then((m) => ({ default: m.Admin })));
 
 function PageLoader() {
   return (
@@ -72,6 +73,7 @@ export default function App() {
         <Route path="emergencias" element={<Lazy><Emergencias /></Lazy>} />
         <Route path="ajustes" element={<Lazy><Settings /></Lazy>} />
         <Route path="activar" element={<Lazy><Activar /></Lazy>} />
+        <Route path="admin" element={<Lazy><Admin /></Lazy>} />
         <Route path="expediente" element={<Lazy><PdfPack /></Lazy>} />
       </Route>
       <Route path="*" element={<Navigate to={signedIn ? "/" : "/entrar"} replace />} />

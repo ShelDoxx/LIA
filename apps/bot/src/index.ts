@@ -34,7 +34,9 @@ import {
   loginWithVerifiedEmail,
   revokeSession,
   sessionFromToken,
+  upsertEntitlement,
   verifyOtp,
+  type EntitlementStatus,
 } from "./auth.js";
 import { sendOtpEmail } from "./mail.js";
 
@@ -84,19 +86,23 @@ app.post("/auth/request-otp", async (req, res) => {
       from: config.emailFrom,
       devMode: config.emailDevMode,
     });
-    if (!sent.ok && !config.emailDevMode) {
+    if (!sent.ok) {
       res.status(503).json({
         ok: false,
-        error: "No pudimos enviar el email. Configurá RESEND_API_KEY o EMAIL_DEV_MODE.",
+        error:
+          sent.detail === "email_not_configured"
+            ? "Email no configurado. Pedí RESEND_API_KEY al admin."
+            : "No pudimos enviar el email. Probá de nuevo en un minuto.",
       });
       return;
     }
     console.log("[auth] otp requested", otp.email, name ?? "", sent.detail);
+    const useDevHint = config.emailDevMode && !config.resendApiKey;
     res.json({
       ok: true,
       email: otp.email,
       expiresInSec: 600,
-      ...(config.emailDevMode ? { devCode: otp.code } : {}),
+      ...(useDevHint ? { devCode: otp.code } : {}),
     });
   } catch (err) {
     res.status(400).json({ ok: false, error: err instanceof Error ? err.message : "Email inválido" });
@@ -166,7 +172,47 @@ app.get("/auth/admin/users", (req, res) => {
     res.sendStatus(401);
     return;
   }
-  res.json({ ok: true, users: listUsers() });
+  res.json({
+    ok: true,
+    users: listUsers(),
+    emailConfigured: Boolean(config.resendApiKey),
+    emailDevMode: config.emailDevMode && !config.resendApiKey,
+  });
+});
+
+/** Admin: activar / pausar plan de un usuario */
+app.post("/auth/admin/entitlement", (req, res) => {
+  const secret = req.headers["x-lia-secret"];
+  const sess = sessionFromToken(bearerToken(req));
+  const adminOk =
+    secret === config.liaSecret || (sess && config.adminEmails.includes(sess.user.email));
+  if (!adminOk) {
+    res.sendStatus(401);
+    return;
+  }
+  const userId = String(req.body?.userId ?? "");
+  const status = String(req.body?.status ?? "") as EntitlementStatus;
+  const plan =
+    req.body?.plan === "setup" ? "setup" : req.body?.plan === "self" ? "self" : undefined;
+  if (!userId || !["none", "trial", "active", "expired"].includes(status)) {
+    res.status(400).json({ ok: false, error: "userId y status válidos requeridos" });
+    return;
+  }
+  const prev = listUsers().find((u) => u.id === userId);
+  if (!prev) {
+    res.status(404).json({ ok: false, error: "Usuario no encontrado" });
+    return;
+  }
+  upsertEntitlement({
+    userId,
+    status,
+    plan: plan ?? prev.entitlement.plan,
+    mpPaymentId: prev.entitlement.mpPaymentId,
+    mpPreapprovalId: prev.entitlement.mpPreapprovalId,
+    updatedAt: new Date().toISOString(),
+  });
+  console.log("[auth] admin entitlement", sess?.user.email ?? "secret", userId, status, plan);
+  res.json({ ok: true, entitlement: listUsers().find((u) => u.id === userId)?.entitlement });
 });
 
 const demoClient: BotClient = {

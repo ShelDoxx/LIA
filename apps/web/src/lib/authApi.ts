@@ -128,6 +128,63 @@ export async function fetchAuthMe() {
   };
 }
 
+export async function fetchAdminUsers() {
+  const token = getSessionToken();
+  if (!token) return { ok: false as const, error: "Sin sesión" };
+  const res = await fetch(botUrl("/auth/admin/users"), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    error?: string;
+    users?: Array<{
+      id: string;
+      email: string;
+      name: string;
+      createdAt: string;
+      lastLoginAt: string;
+      entitlement: LiaEntitlement;
+    }>;
+    emailConfigured?: boolean;
+    emailDevMode?: boolean;
+  };
+  if (!res.ok || !data.ok) {
+    return { ok: false as const, error: data.error || "No autorizado" };
+  }
+  return {
+    ok: true as const,
+    users: data.users ?? [],
+    emailConfigured: Boolean(data.emailConfigured),
+    emailDevMode: Boolean(data.emailDevMode),
+  };
+}
+
+export async function adminSetEntitlement(opts: {
+  userId: string;
+  status: LiaEntitlement["status"];
+  plan?: "self" | "setup";
+}) {
+  const token = getSessionToken();
+  if (!token) return { ok: false as const, error: "Sin sesión" };
+  const res = await fetch(botUrl("/auth/admin/entitlement"), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(opts),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    error?: string;
+    entitlement?: LiaEntitlement;
+  };
+  if (!res.ok || !data.ok) {
+    return { ok: false as const, error: data.error || "No se pudo actualizar" };
+  }
+  return { ok: true as const, entitlement: data.entitlement };
+}
+
 export async function logoutSession() {
   const token = getSessionToken();
   if (token) {

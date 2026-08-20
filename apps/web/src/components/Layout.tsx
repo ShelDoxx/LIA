@@ -16,6 +16,7 @@ import {
   Users,
   Wallet,
   FileText,
+  Shield,
   X,
 } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -48,16 +49,22 @@ const moreLinks: NavItem[] = [
   { to: "/ajustes", label: "Marca", icon: Settings },
 ];
 
-const links: NavItem[] = [...primaryLinks, ...moreLinks];
-
 export function Layout() {
-  const { state, signOut } = useLia();
+  const { state, signOut, isAdmin } = useLia();
   const loc = useLocation();
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
   const [moreNav, setMoreNav] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
+  const navMore = useMemo(
+    () =>
+      isAdmin
+        ? [...moreLinks, { to: "/admin", label: "Admin", icon: Shield } satisfies NavItem]
+        : moreLinks,
+    [isAdmin],
+  );
+  const links: NavItem[] = useMemo(() => [...primaryLinks, ...navMore], [navMore]);
   const agenda = useMemo(() => buildAgenda(state), [state]);
   const urgent = useMemo(
     () => agenda.filter((a) => a.urgency === "now" && !state.doneAgenda.includes(a.id)),
@@ -148,7 +155,7 @@ export function Layout() {
             type="button"
             onClick={() => setMoreNav((v) => !v)}
             className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm transition ${
-              moreLinks.some((l) => loc.pathname.startsWith(l.to))
+              navMore.some((l) => loc.pathname.startsWith(l.to))
                 ? "bg-white/10 text-white"
                 : "text-paper/65 hover:bg-white/5 hover:text-paper"
             }`}
@@ -156,9 +163,9 @@ export function Layout() {
             <Menu size={17} />
             Más
           </button>
-          {(moreNav || moreLinks.some((l) => loc.pathname.startsWith(l.to))) && (
+          {(moreNav || navMore.some((l) => loc.pathname.startsWith(l.to))) && (
             <div className="space-y-0.5 border-l border-white/10 pl-2">
-              {moreLinks.map((l) => (
+              {navMore.map((l) => (
                 <NavLink
                   key={l.to}
                   to={l.to}
@@ -379,7 +386,7 @@ export function Layout() {
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                {moreLinks.map((l) => (
+                {navMore.map((l) => (
                   <NavLink
                     key={l.to}
                     to={l.to}
