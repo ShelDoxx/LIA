@@ -24,8 +24,10 @@ describe("billing", () => {
     expect(checkSubscription(sub)).toBe("trial_ending");
   });
 
-  it("activa plan y deja de estar en trial", () => {
-    const sub = activateSubscription(initTrial());
+  it("activa setup y marca meet pendiente", () => {
+    const sub = activateSubscription(initTrial(), { plan: "setup" });
     expect(checkSubscription(sub)).toBe("ok");
+    expect(sub.plan).toBe("setup");
+    expect(sub.setupMeetPending).toBe(true);
   });
 });

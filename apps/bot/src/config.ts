@@ -14,6 +14,10 @@ export const config = {
    */
   liaSecret: process.env.LIA_BOT_SECRET ?? randomBytes(20).toString("hex"),
   graphVersion: "v21.0",
+  /** Access Token de Mercado Pago (suscripciones / webhooks) */
+  mpAccessToken: process.env.MP_ACCESS_TOKEN ?? "",
+  /** Forzar firma Meta (set REQUIRE_META_SIGNATURE=true en el server) */
+  requireMetaSignature: process.env.REQUIRE_META_SIGNATURE === "true",
 };
 
 export function isConfigured() {

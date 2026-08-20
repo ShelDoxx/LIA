@@ -19,7 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { checkSubscription, trialDaysLeft, activateSubscription, startCheckout } from "@/lib/billing";
+import { checkSubscription, trialDaysLeft } from "@/lib/billing";
 import { useLia } from "@/context/LiaContext";
 import { buildAgenda } from "@/lib/agenda";
 import { fullName } from "@/lib/format";
@@ -51,7 +51,7 @@ const moreLinks: NavItem[] = [
 const links: NavItem[] = [...primaryLinks, ...moreLinks];
 
 export function Layout() {
-  const { state, signOut, save } = useLia();
+  const { state, signOut } = useLia();
   const loc = useLocation();
   const navigate = useNavigate();
   const [q, setQ] = useState("");
@@ -299,63 +299,33 @@ export function Layout() {
         {state.producer.plan === "demo" ? (
           <div className="border-b border-gold/30 bg-gold/10 px-4 py-2 text-center text-sm text-forest md:px-8">
             Estás en <strong>demo</strong>. Activá Plan Estudio para usar cartera real, importar CSV y producir por WhatsApp.
-            <button
-              type="button"
-              className="ml-2 underline"
-              onClick={() =>
-                startCheckout(() =>
-                  void save({
-                    ...state,
-                    producer: {
-                      ...state.producer,
-                      plan: "estudio",
-                      subscription: activateSubscription(
-                        state.producer.subscription ?? {
-                          status: "trial",
-                          startedAt: new Date().toISOString(),
-                        },
-                      ),
-                    },
-                  }),
-                )
-              }
-            >
+            <Link to="/activar" className="ml-2 underline">
               Activar Plan Estudio
-            </button>
+            </Link>
           </div>
         ) : state.producer.plan === "estudio" && subStatus !== "ok" ? (
           <div
             className={`border-b px-4 py-2 text-center text-sm md:px-8 ${
-              subStatus === "expired" ? "border-danger/30 bg-red-50 text-danger" : "border-gold/30 bg-gold/10 text-forest"
+              subStatus === "expired" || subStatus === "pending_payment"
+                ? "border-danger/30 bg-red-50 text-danger"
+                : "border-gold/30 bg-gold/10 text-forest"
             }`}
           >
-            {subStatus === "expired" ? (
-              <>Activá Estudio (USD 49/mes) para empezar a usar Lía.</>
+            {subStatus === "expired" || subStatus === "pending_payment" ? (
+              <>Activá Estudio: Self USD 49/mes o Setup USD 149 (1er mes).</>
             ) : (
-              <>Activá Estudio (USD 49/mes). {trialLeft} día{trialLeft === 1 ? "" : "s"} restantes</>
+              <>Activá Estudio. {trialLeft} día{trialLeft === 1 ? "" : "s"} de trial restantes</>
             )}
-            <button
-              type="button"
-              className="ml-2 underline"
-              onClick={() =>
-                startCheckout(() =>
-                  void save({
-                    ...state,
-                    producer: {
-                      ...state.producer,
-                      subscription: activateSubscription(
-                        state.producer.subscription ?? {
-                          status: "trial",
-                          startedAt: new Date().toISOString(),
-                        },
-                      ),
-                    },
-                  }),
-                )
-              }
-            >
-              Activar plan
-            </button>
+            <Link to="/activar" className="ml-2 underline">
+              Ver planes
+            </Link>
+          </div>
+        ) : state.producer.subscription?.setupMeetPending ? (
+          <div className="border-b border-gold/30 bg-gold/10 px-4 py-2 text-center text-sm text-forest md:px-8">
+            Setup completo activo.{" "}
+            <Link to="/activar" className="underline">
+              Coordiná el meet por WhatsApp
+            </Link>
           </div>
         ) : null}
         <main className="flex-1 px-4 py-6 pb-24 md:px-8 md:pb-6">

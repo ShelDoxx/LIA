@@ -4,11 +4,10 @@ import { useLia } from "@/context/LiaContext";
 import { ImportCarteraModal } from "@/components/CsvImporter";
 import { Badge, Button, Card, Field, inputClass, Modal } from "@/components/ui";
 import { fullName, initials, normalizePhoneAR } from "@/lib/format";
-import { activateSubscription, startCheckout } from "@/lib/billing";
 import type { Client } from "@/lib/types";
 
 export function Clients() {
-  const { state, addClient, updateClient, save } = useLia();
+  const { state, addClient, updateClient } = useLia();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -54,28 +53,9 @@ export function Clients() {
             </Button>
           )}
           {isDemo ? (
-            <Button
-              variant="gold"
-              onClick={() =>
-                startCheckout(() =>
-                  void save({
-                    ...state,
-                    producer: {
-                      ...state.producer,
-                      plan: "estudio",
-                      subscription: activateSubscription(
-                        state.producer.subscription ?? {
-                          status: "trial",
-                          startedAt: new Date().toISOString(),
-                        },
-                      ),
-                    },
-                  }),
-                )
-              }
-            >
-              Activar Plan Estudio
-            </Button>
+            <Link to="/activar">
+              <Button variant="gold">Activar Plan Estudio</Button>
+            </Link>
           ) : (
             <>
               <Button variant="ghost" onClick={() => setImportOpen(true)}>
@@ -104,28 +84,9 @@ export function Clients() {
                 </p>
                 <div className="mt-4 flex flex-wrap justify-center gap-2">
                   {isDemo ? (
-                    <Button
-                      variant="gold"
-                      onClick={() =>
-                        startCheckout(() =>
-                          void save({
-                            ...state,
-                            producer: {
-                              ...state.producer,
-                              plan: "estudio",
-                              subscription: activateSubscription(
-                                state.producer.subscription ?? {
-                                  status: "trial",
-                                  startedAt: new Date().toISOString(),
-                                },
-                              ),
-                            },
-                          }),
-                        )
-                      }
-                    >
-                      Activar Plan Estudio
-                    </Button>
+                    <Link to="/activar">
+                      <Button variant="gold">Activar Plan Estudio</Button>
+                    </Link>
                   ) : (
                     <>
                       <Button onClick={() => setOpen(true)}>Nuevo cliente</Button>

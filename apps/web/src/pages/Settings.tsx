@@ -1,9 +1,9 @@
+import { Link } from "react-router-dom";
 import { useLia } from "@/context/LiaContext";
 import { CsvImporter } from "@/components/CsvImporter";
 import { MetaWizard } from "@/components/MetaWizard";
 import { Badge, Button, Card, Field, inputClass } from "@/components/ui";
 import { firebaseEnabled } from "@/lib/firebase";
-import { activateSubscription, startCheckout } from "@/lib/billing";
 import { ALL_RAMOS, POLICY_LABEL, type LiaState } from "@/lib/types";
 import { useState } from "react";
 
@@ -240,9 +240,9 @@ export function Settings() {
       <Card className="overflow-hidden p-0">
         <div className="bg-forest-deep p-6 text-paper">
           <p className="text-xs uppercase tracking-wide text-gold">Cómo se cobra a un colega</p>
-          <p className="mt-2 font-serif text-3xl">Estudio · USD 49 / mes</p>
+          <p className="mt-2 font-serif text-3xl">Self USD 49 · Setup USD 149</p>
           <p className="mt-2 text-sm text-paper/70">
-            Una sola renovación de auto que no se te cae ya paga el año. El resto es ganancia.
+            Self-service a tu ritmo, o setup completo (1er mes incluido) con meet por WhatsApp.
           </p>
           <ul className="mt-4 space-y-1 text-sm text-paper/80">
             <li>PDF único para SMG LIFE y el resto: DNI + tarjeta en un archivo</li>
@@ -251,32 +251,15 @@ export function Settings() {
             <li>WhatsApp con tu marca + bóveda</li>
           </ul>
           {p.plan === "estudio" && p.subscription?.status !== "active" ? (
-            <Button
-              variant="gold"
-              className="mt-5"
-              onClick={() =>
-                startCheckout(() =>
-                  void save({
-                    ...state,
-                    producer: {
-                      ...p,
-                      subscription: activateSubscription(
-                        p.subscription ?? {
-                          status: "trial",
-                          startedAt: new Date().toISOString(),
-                        },
-                      ),
-                    },
-                  }),
-                )
-              }
-            >
-              Activar Plan Estudio
-            </Button>
+            <Link to="/activar">
+              <Button variant="gold" className="mt-5">
+                Ver planes y activar
+              </Button>
+            </Link>
           ) : null}
           <p className="mt-3 text-xs text-paper/50">
-            Cobro real: pegá el link de Mercado Pago o Stripe en VITE_MP_CHECKOUT_URL. Sin link, se
-            activa en este dispositivo.
+            Cobro real: VITE_MP_CHECKOUT_SELF_URL (49) y VITE_MP_CHECKOUT_SETUP_URL (149). Sin links,
+            se activa en este dispositivo.
           </p>
         </div>
       </Card>

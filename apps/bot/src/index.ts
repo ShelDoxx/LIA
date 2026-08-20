@@ -20,6 +20,11 @@ import {
   setWhatsAppConfig,
 } from "./runtimeConfig.js";
 import { subscribeAppToWaba } from "./subscribeWaba.js";
+import {
+  findActivation,
+  handleMercadoPagoNotification,
+  listActivations,
+} from "./mercadopago.js";
 
 const app = express();
 
@@ -150,7 +155,7 @@ function explainWhatsAppError(err: unknown): string {
   }
 }
 
-app.post("/test-message", async (req, res) => {
+app.post("/test-message", requireLiaSecret, async (req, res) => {
   const phone = String(req.body?.phone ?? "").replace(/\D/g, "");
   const text = String(req.body?.text ?? "Hola desde Lía — conexión Meta OK. Tu estudio ya puede enviar mensajes.");
   if (!phone) {
@@ -184,6 +189,52 @@ app.post("/context", requireLiaSecret, (req, res) => {
 
 app.get("/pending-docs", requireLiaSecret, (_req, res) => {
   res.json(drainInbox());
+});
+
+/** Webhook Mercado Pago (Suscripciones + pagos). Configurar en MP → Notificaciones. */
+app.post("/mercadopago/webhook", async (req, res) => {
+  res.sendStatus(200);
+  try {
+    const topic = String(req.query.topic ?? req.query.type ?? "");
+    const id = String(req.query.id ?? req.query["data.id"] ?? "");
+    await handleMercadoPagoNotification({
+      topic,
+      id,
+      body: req.body as Record<string, unknown>,
+      accessToken: config.mpAccessToken,
+    });
+  } catch (err) {
+    console.error("[mp] webhook error", err);
+  }
+});
+
+app.get("/mercadopago/webhook", async (req, res) => {
+  // IPN clásico a veces usa GET
+  try {
+    const result = await handleMercadoPagoNotification({
+      topic: String(req.query.topic ?? ""),
+      id: String(req.query.id ?? ""),
+      accessToken: config.mpAccessToken,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false });
+  }
+});
+
+app.get("/billing/activations", requireLiaSecret, (_req, res) => {
+  res.json({ activations: listActivations() });
+});
+
+app.get("/billing/status", requireLiaSecret, (req, res) => {
+  const email = String(req.query.email ?? "");
+  const externalReference = String(req.query.ref ?? "");
+  const hit = findActivation({
+    email: email || undefined,
+    externalReference: externalReference || undefined,
+  });
+  res.json({ ok: true, activation: hit ?? null });
 });
 
 app.get("/public/policy/:id", (req, res) => {

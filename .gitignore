@@ -5,6 +5,7 @@ dist
 .env
 .env.local
 apps/bot/.meta-runtime.json
+apps/bot/.*-store.json
 .env.*.local
 .firebase
 .idea

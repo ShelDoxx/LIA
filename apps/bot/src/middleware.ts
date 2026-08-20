@@ -8,6 +8,11 @@ import { config } from "./config.js";
  */
 export function verifyWebhookSignature(req: Request, res: Response, next: NextFunction) {
   if (!config.appSecret) {
+    if (config.requireMetaSignature) {
+      console.warn("[webhook] META_APP_SECRET requerido en producción");
+      res.sendStatus(503);
+      return;
+    }
     return next();
   }
   const sig = req.headers["x-hub-signature-256"];
