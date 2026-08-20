@@ -19,6 +19,8 @@ export const config = {
   /** Links públicos de checkout (no son secretos) */
   mpCheckoutSelfUrl: process.env.MP_CHECKOUT_SELF_URL ?? "",
   mpCheckoutSetupUrl: process.env.MP_CHECKOUT_SETUP_URL ?? "",
+  /** Clave secreta del webhook (MP → Notificaciones → revelar) */
+  mpWebhookSecret: process.env.MP_WEBHOOK_SECRET ?? "",
   /** Forzar firma Meta (set REQUIRE_META_SIGNATURE=true en el server) */
   requireMetaSignature: process.env.REQUIRE_META_SIGNATURE === "true",
 };

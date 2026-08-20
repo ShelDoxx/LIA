@@ -24,6 +24,7 @@ import {
   findActivation,
   handleMercadoPagoNotification,
   listActivations,
+  verifyMpWebhookSignature,
 } from "./mercadopago.js";
 
 const app = express();
@@ -193,14 +194,28 @@ app.get("/pending-docs", requireLiaSecret, (_req, res) => {
 
 /** Webhook Mercado Pago (Suscripciones + pagos). Configurar en MP → Notificaciones. */
 app.post("/mercadopago/webhook", async (req, res) => {
+  const body = req.body as Record<string, unknown>;
+  const data = body?.data as { id?: string } | undefined;
+  const dataId = String(data?.id ?? req.query["data.id"] ?? req.query.id ?? "");
+  const okSig = verifyMpWebhookSignature({
+    secret: config.mpWebhookSecret,
+    xSignature: typeof req.headers["x-signature"] === "string" ? req.headers["x-signature"] : undefined,
+    xRequestId: typeof req.headers["x-request-id"] === "string" ? req.headers["x-request-id"] : undefined,
+    dataId,
+  });
+  if (!okSig) {
+    console.warn("[mp] firma webhook inválida");
+    res.sendStatus(401);
+    return;
+  }
   res.sendStatus(200);
   try {
-    const topic = String(req.query.topic ?? req.query.type ?? "");
-    const id = String(req.query.id ?? req.query["data.id"] ?? "");
+    const topic = String(req.query.topic ?? req.query.type ?? body?.type ?? "");
+    const id = String(req.query.id ?? req.query["data.id"] ?? dataId);
     await handleMercadoPagoNotification({
       topic,
       id,
-      body: req.body as Record<string, unknown>,
+      body,
       accessToken: config.mpAccessToken,
     });
   } catch (err) {
@@ -209,7 +224,7 @@ app.post("/mercadopago/webhook", async (req, res) => {
 });
 
 app.get("/mercadopago/webhook", async (req, res) => {
-  // IPN clásico a veces usa GET
+  // IPN clásico / healthcheck de MP
   try {
     const result = await handleMercadoPagoNotification({
       topic: String(req.query.topic ?? ""),

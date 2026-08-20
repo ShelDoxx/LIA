@@ -1,6 +1,47 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { loadStore, saveStore } from "./botStore.js";
 
 export type BillingPlan = "self" | "setup";
+
+/**
+ * Valida x-signature de Mercado Pago.
+ * Manifest: id:{data.id};request-id:{x-request-id};ts:{ts};
+ */
+export function verifyMpWebhookSignature(opts: {
+  secret: string;
+  xSignature?: string;
+  xRequestId?: string;
+  dataId?: string;
+}): boolean {
+  const { secret, xSignature, xRequestId, dataId } = opts;
+  if (!secret) return true; // sin secret configurado, no bloqueamos (dev)
+  if (!xSignature) return false;
+
+  const parts: Record<string, string> = {};
+  for (const chunk of xSignature.split(",")) {
+    const [k, ...rest] = chunk.trim().split("=");
+    if (k) parts[k] = rest.join("=");
+  }
+  const ts = parts.ts;
+  const v1 = parts.v1;
+  if (!ts || !v1) return false;
+
+  const id = (dataId ?? "").toLowerCase();
+  let manifest = "";
+  if (id) manifest += `id:${id};`;
+  if (xRequestId) manifest += `request-id:${xRequestId};`;
+  manifest += `ts:${ts};`;
+
+  const expected = createHmac("sha256", secret).update(manifest).digest("hex");
+  try {
+    const a = Buffer.from(v1, "utf8");
+    const b = Buffer.from(expected, "utf8");
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
 
 export type BillingActivation = {
   id: string;
