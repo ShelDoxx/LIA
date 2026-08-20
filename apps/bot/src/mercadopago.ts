@@ -513,8 +513,17 @@ export async function syncRecentApprovals(opts: {
 }): Promise<{ ok: boolean; activation?: BillingActivation; detail?: string }> {
   if (!opts.accessToken) return { ok: false, detail: "MP_ACCESS_TOKEN no configurado" };
   const headers = { Authorization: `Bearer ${opts.accessToken}` };
-  const sinceMs = opts.sinceIso ? Date.parse(opts.sinceIso) : Date.now() - 30 * 60_000;
-  const since = Number.isFinite(sinceMs) ? sinceMs : Date.now() - 30 * 60_000;
+  const sinceMs = opts.sinceIso ? Date.parse(opts.sinceIso) : Date.now() - 24 * 60 * 60_000;
+  const since = Number.isFinite(sinceMs) ? sinceMs : Date.now() - 24 * 60 * 60_000;
+
+  // Primero: ya activado en el store (p.ej. webhook/sync anterior)
+  const fromStore = store.activations.find((a) => {
+    if (a.status !== "active") return false;
+    if (opts.plan && a.plan !== opts.plan) return false;
+    const t = Date.parse(a.updatedAt || a.createdAt);
+    return Number.isFinite(t) && t >= since - 60_000;
+  });
+  if (fromStore) return { ok: true, activation: fromStore, detail: "from_store" };
 
   // 1) Suscripciones recientes
   const preRes = await fetch("https://api.mercadopago.com/preapproval/search?limit=20", {
@@ -601,13 +610,7 @@ export async function syncRecentApprovals(opts: {
     }
   }
 
-  // 2) Ya guardadas por webhook
-  const recent = store.activations.find((a) => {
-    if (a.status !== "active") return false;
-    const t = Date.parse(a.updatedAt || a.createdAt);
-    return Number.isFinite(t) && t >= since - 60_000;
-  });
-  if (recent) return { ok: true, activation: recent, detail: "from_store" };
+  // 2) Ya no hace falta buscar otra vez en store (se hizo al inicio)
 
   return {
     ok: false,
