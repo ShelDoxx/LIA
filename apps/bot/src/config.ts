@@ -16,6 +16,9 @@ export const config = {
   graphVersion: "v21.0",
   /** Access Token de Mercado Pago (suscripciones / webhooks) */
   mpAccessToken: process.env.MP_ACCESS_TOKEN ?? "",
+  /** Links públicos de checkout (no son secretos) */
+  mpCheckoutSelfUrl: process.env.MP_CHECKOUT_SELF_URL ?? "",
+  mpCheckoutSetupUrl: process.env.MP_CHECKOUT_SETUP_URL ?? "",
   /** Forzar firma Meta (set REQUIRE_META_SIGNATURE=true en el server) */
   requireMetaSignature: process.env.REQUIRE_META_SIGNATURE === "true",
 };

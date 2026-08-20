@@ -58,8 +58,17 @@ export function markMeetScheduled(sub: Subscription): Subscription {
 }
 
 /** Checkout self-service: USD 49/mes */
+let runtimeSelfUrl = "";
+let runtimeSetupUrl = "";
+
+export function setRuntimeCheckoutUrls(urls: { selfUrl?: string; setupUrl?: string }) {
+  if (urls.selfUrl) runtimeSelfUrl = urls.selfUrl;
+  if (urls.setupUrl) runtimeSetupUrl = urls.setupUrl;
+}
+
 export function checkoutSelfUrl() {
   return (
+    runtimeSelfUrl ||
     (typeof import.meta !== "undefined" &&
       (import.meta.env?.VITE_MP_CHECKOUT_SELF_URL || import.meta.env?.VITE_MP_CHECKOUT_URL)) ||
     ""
@@ -69,8 +78,35 @@ export function checkoutSelfUrl() {
 /** Checkout setup completo: USD 149 (1er mes incluido) → luego 49/mes */
 export function checkoutSetupUrl() {
   return (
-    (typeof import.meta !== "undefined" && import.meta.env?.VITE_MP_CHECKOUT_SETUP_URL) || ""
+    runtimeSetupUrl ||
+    (typeof import.meta !== "undefined" && import.meta.env?.VITE_MP_CHECKOUT_SETUP_URL) ||
+    ""
   );
+}
+
+export async function loadCheckoutConfigFromBot(): Promise<{
+  selfUrl: string;
+  setupUrl: string;
+  mpConfigured: boolean;
+}> {
+  try {
+    const { botUrl } = await import("@/lib/botBase");
+    const res = await fetch(botUrl("/billing/checkout-config"));
+    if (!res.ok) return { selfUrl: "", setupUrl: "", mpConfigured: false };
+    const data = (await res.json()) as {
+      selfUrl?: string;
+      setupUrl?: string;
+      mpConfigured?: boolean;
+    };
+    setRuntimeCheckoutUrls({ selfUrl: data.selfUrl, setupUrl: data.setupUrl });
+    return {
+      selfUrl: data.selfUrl ?? "",
+      setupUrl: data.setupUrl ?? "",
+      mpConfigured: Boolean(data.mpConfigured),
+    };
+  } catch {
+    return { selfUrl: "", setupUrl: "", mpConfigured: false };
+  }
 }
 
 /** Tu WhatsApp para coordinar el meet del setup completo */

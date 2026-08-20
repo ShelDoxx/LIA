@@ -223,6 +223,15 @@ app.get("/mercadopago/webhook", async (req, res) => {
   }
 });
 
+app.get("/billing/checkout-config", (_req, res) => {
+  res.json({
+    ok: true,
+    selfUrl: config.mpCheckoutSelfUrl || "",
+    setupUrl: config.mpCheckoutSetupUrl || "",
+    mpConfigured: Boolean(config.mpAccessToken),
+  });
+});
+
 app.get("/billing/activations", requireLiaSecret, (_req, res) => {
   res.json({ activations: listActivations() });
 });

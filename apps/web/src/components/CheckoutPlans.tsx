@@ -1,7 +1,9 @@
+import { useEffect, useState } from "react";
 import { Button, Card } from "@/components/ui";
 import {
   checkoutSelfUrl,
   checkoutSetupUrl,
+  loadCheckoutConfigFromBot,
   setupMeetWhatsAppUrl,
   startCheckout,
   type SubscriptionPlan,
@@ -14,8 +16,25 @@ type Props = {
 };
 
 export function CheckoutPlans({ producerName, onActivate, compact }: Props) {
-  const hasSelf = Boolean(checkoutSelfUrl());
-  const hasSetup = Boolean(checkoutSetupUrl());
+  const [ready, setReady] = useState(false);
+  const [selfUrl, setSelfUrl] = useState(checkoutSelfUrl());
+  const [setupUrl, setSetupUrl] = useState(checkoutSetupUrl());
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadCheckoutConfigFromBot().then((cfg) => {
+      if (cancelled) return;
+      setSelfUrl(cfg.selfUrl || checkoutSelfUrl());
+      setSetupUrl(cfg.setupUrl || checkoutSetupUrl());
+      setReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const hasSelf = Boolean(selfUrl);
+  const hasSetup = Boolean(setupUrl);
   const hasAny = hasSelf || hasSetup;
 
   function pick(plan: SubscriptionPlan) {
@@ -38,8 +57,13 @@ export function CheckoutPlans({ producerName, onActivate, compact }: Props) {
           <li>· Onboarding guiado en pantalla</li>
           <li>· Sin reunión con nosotros</li>
         </ul>
-        <Button variant="ghost" className="mt-5 w-full py-3" onClick={() => pick("self")}>
-          {hasSelf || !hasAny ? "Elegir Self-service" : "Configurá el link MP (self)"}
+        <Button
+          variant="ghost"
+          className="mt-5 w-full py-3"
+          disabled={!ready && !hasAny}
+          onClick={() => pick("self")}
+        >
+          Elegir Self-service
         </Button>
       </Card>
 
@@ -55,15 +79,20 @@ export function CheckoutPlans({ producerName, onActivate, compact }: Props) {
           <li>· Meta + WhatsApp + cartera juntos</li>
           <li>· Meet de setup por WhatsApp</li>
         </ul>
-        <Button variant="gold" className="mt-5 w-full py-3" onClick={() => pick("setup")}>
-          {hasSetup || !hasAny ? "Elegir Setup completo" : "Configurá el link MP (setup)"}
+        <Button
+          variant="gold"
+          className="mt-5 w-full py-3"
+          disabled={!ready && !hasAny}
+          onClick={() => pick("setup")}
+        >
+          Elegir Setup completo
         </Button>
       </Card>
 
-      {!hasAny && (
+      {!hasAny && ready && (
         <p className="text-xs text-ink-soft md:col-span-2">
-          Sin links de Mercado Pago en env, se activa en este dispositivo (modo demo). En producción
-          pegá <code>VITE_MP_CHECKOUT_SELF_URL</code> y <code>VITE_MP_CHECKOUT_SETUP_URL</code>.
+          Links de Mercado Pago aún no cargaron desde el bot. Se puede activar en modo demo en este
+          dispositivo.
         </p>
       )}
     </div>
