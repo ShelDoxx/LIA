@@ -21,6 +21,7 @@ import {
 } from "./runtimeConfig.js";
 import { subscribeAppToWaba } from "./subscribeWaba.js";
 import {
+  confirmByOperationId,
   findActivation,
   handleMercadoPagoNotification,
   listActivations,
@@ -254,6 +255,33 @@ app.get("/billing/checkout-config", (_req, res) => {
     setupUrl: config.mpCheckoutSetupUrl || "",
     mpConfigured: Boolean(config.mpAccessToken),
   });
+});
+
+/** Confirma pago con ID de operación de MP (pantalla de éxito). */
+app.post("/billing/confirm", async (req, res) => {
+  const operationId = String(req.body?.operationId ?? req.body?.id ?? "");
+  const claimed = req.body?.plan === "setup" ? "setup" : req.body?.plan === "self" ? "self" : undefined;
+  try {
+    const result = await confirmByOperationId({
+      operationId,
+      accessToken: config.mpAccessToken,
+      claimedPlan: claimed,
+    });
+    if (!result.ok || !result.activation || result.activation.status !== "active") {
+      res.status(400).json({ ok: false, error: result.detail || "No se pudo confirmar el pago" });
+      return;
+    }
+    res.json({
+      ok: true,
+      plan: result.activation.plan,
+      setupMeetPending: result.activation.setupMeetPending,
+      amount: result.activation.amount,
+      detail: result.detail,
+    });
+  } catch (err) {
+    console.error("[mp] confirm error", err);
+    res.status(500).json({ ok: false, error: "Error al hablar con Mercado Pago" });
+  }
 });
 
 app.get("/billing/activations", requireLiaSecret, (_req, res) => {

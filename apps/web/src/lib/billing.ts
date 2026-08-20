@@ -157,7 +157,32 @@ export function startCheckout(
   return "demo";
 }
 
-/** @deprecated usar startCheckout("self" | "setup", ...) */
-export function checkoutUrl() {
-  return checkoutSelfUrl();
+export async function confirmMercadoPagoPayment(
+  operationId: string,
+  plan?: SubscriptionPlan,
+): Promise<{ ok: boolean; plan?: SubscriptionPlan; setupMeetPending?: boolean; error?: string }> {
+  try {
+    const { botUrl } = await import("@/lib/botBase");
+    const res = await fetch(botUrl("/billing/confirm"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operationId, plan }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      plan?: SubscriptionPlan;
+      setupMeetPending?: boolean;
+      error?: string;
+    };
+    if (!res.ok || !data.ok) {
+      return { ok: false, error: data.error || "No se pudo confirmar el pago" };
+    }
+    return {
+      ok: true,
+      plan: data.plan ?? plan ?? "self",
+      setupMeetPending: data.setupMeetPending,
+    };
+  } catch {
+    return { ok: false, error: "No pude contactar al servidor de Lía" };
+  }
 }

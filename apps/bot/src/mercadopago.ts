@@ -211,3 +211,154 @@ export function findActivation(query: { email?: string; externalReference?: stri
     return false;
   });
 }
+
+function alreadyUsed(operationId: string): BillingActivation | undefined {
+  return store.activations.find(
+    (a) =>
+      a.status === "active" &&
+      (a.mpPaymentId === operationId || a.mpPreapprovalId === operationId),
+  );
+}
+
+/**
+ * Confirma un pago/suscripción con el ID de operación de Mercado Pago
+ * (el que aparece en la pantalla de éxito).
+ */
+export async function confirmByOperationId(opts: {
+  operationId: string;
+  accessToken: string;
+  claimedPlan?: BillingPlan;
+}): Promise<{ ok: boolean; activation?: BillingActivation; detail?: string }> {
+  const id = opts.operationId.replace(/\D/g, "");
+  if (!id || id.length < 6) return { ok: false, detail: "ID de operación inválido" };
+  if (!opts.accessToken) return { ok: false, detail: "MP_ACCESS_TOKEN no configurado" };
+
+  const used = alreadyUsed(id);
+  if (used) {
+    return { ok: true, activation: used, detail: "already_active" };
+  }
+
+  const headers = { Authorization: `Bearer ${opts.accessToken}` };
+
+  // 1) Pago único
+  {
+    const res = await fetch(`https://api.mercadopago.com/v1/payments/${id}`, { headers });
+    if (res.ok) {
+      const data = (await res.json()) as {
+        id?: number;
+        status?: string;
+        transaction_amount?: number;
+        currency_id?: string;
+        external_reference?: string;
+        payer?: { email?: string };
+        description?: string;
+      };
+      if (data.status !== "approved") {
+        return { ok: false, detail: `Pago en estado: ${data.status ?? "desconocido"}` };
+      }
+      const amount = data.transaction_amount;
+      const plan =
+        opts.claimedPlan ??
+        detectPlan(amount, `${data.external_reference ?? ""} ${data.description ?? ""}`);
+      const activation: BillingActivation = {
+        id: crypto.randomUUID(),
+        plan,
+        status: "active",
+        email: data.payer?.email,
+        externalReference: data.external_reference,
+        mpPaymentId: String(data.id ?? id),
+        amount,
+        currency: data.currency_id,
+        setupMeetPending: plan === "setup",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        rawType: "confirm.payment",
+      };
+      upsert(activation);
+      console.log("[mp] confirm payment", plan, amount, id);
+      return { ok: true, activation };
+    }
+  }
+
+  // 2) Authorized payment (cobro de suscripción)
+  {
+    const res = await fetch(`https://api.mercadopago.com/authorized_payments/${id}`, { headers });
+    if (res.ok) {
+      const data = (await res.json()) as {
+        id?: number;
+        status?: string;
+        transaction_amount?: number;
+        currency_id?: string;
+        preapproval_id?: string;
+        payment?: { id?: number; status?: string };
+      };
+      const payStatus = data.payment?.status ?? data.status;
+      if (payStatus !== "approved" && data.status !== "processed") {
+        return { ok: false, detail: `Suscripción/cobro en estado: ${payStatus ?? data.status}` };
+      }
+      const amount = data.transaction_amount;
+      const plan = opts.claimedPlan ?? detectPlan(amount);
+      const activation: BillingActivation = {
+        id: crypto.randomUUID(),
+        plan,
+        status: "active",
+        mpPaymentId: String(data.payment?.id ?? data.id ?? id),
+        mpPreapprovalId: data.preapproval_id,
+        amount,
+        currency: data.currency_id,
+        setupMeetPending: plan === "setup",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        rawType: "confirm.authorized_payment",
+      };
+      upsert(activation);
+      console.log("[mp] confirm authorized_payment", plan, amount, id);
+      return { ok: true, activation };
+    }
+  }
+
+  // 3) Preapproval (suscripción)
+  {
+    const res = await fetch(`https://api.mercadopago.com/preapproval/${id}`, { headers });
+    if (res.ok) {
+      const data = (await res.json()) as {
+        id?: string;
+        status?: string;
+        payer_email?: string;
+        external_reference?: string;
+        reason?: string;
+        auto_recurring?: { transaction_amount?: number; currency_id?: string };
+      };
+      if (data.status !== "authorized" && data.status !== "active") {
+        return { ok: false, detail: `Suscripción en estado: ${data.status ?? "desconocido"}` };
+      }
+      const amount = data.auto_recurring?.transaction_amount;
+      const plan =
+        opts.claimedPlan ??
+        detectPlan(amount, `${data.external_reference ?? ""} ${data.reason ?? ""}`);
+      const activation: BillingActivation = {
+        id: crypto.randomUUID(),
+        plan,
+        status: "active",
+        email: data.payer_email,
+        externalReference: data.external_reference,
+        mpPreapprovalId: String(data.id ?? id),
+        amount,
+        currency: data.auto_recurring?.currency_id,
+        setupMeetPending: plan === "setup",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        rawType: "confirm.preapproval",
+      };
+      upsert(activation);
+      console.log("[mp] confirm preapproval", plan, amount, id);
+      return { ok: true, activation };
+    }
+  }
+
+  return {
+    ok: false,
+    detail:
+      "No encontramos ese ID en Mercado Pago. Revisá el número de operación de la pantalla de éxito.",
+  };
+}

@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useLia } from "@/context/LiaContext";
-import { Button, Card } from "@/components/ui";
+import { Button, Card, Field, inputClass } from "@/components/ui";
 import { CheckoutPlans } from "@/components/CheckoutPlans";
 import {
   activateSubscription,
+  checkoutSelfUrl,
+  checkoutSetupUrl,
+  confirmMercadoPagoPayment,
   markMeetScheduled,
   setupMeetWhatsAppUrl,
   type SubscriptionPlan,
@@ -34,9 +37,12 @@ export function Activar() {
   const sub = state.producer.subscription;
   const meetPending = sub?.status === "active" && sub.setupMeetPending;
   const [pendingPlan, setPendingPlan] = useState<SubscriptionPlan | null>(() => readPendingPlan());
+  const [operationId, setOperationId] = useState("");
+  const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
 
-  function onActivate(plan: SubscriptionPlan) {
+  function applyActivation(plan: SubscriptionPlan, setupMeetPending?: boolean) {
     clearPendingPlan();
     setPendingPlan(null);
     void save({
@@ -46,26 +52,55 @@ export function Activar() {
         plan: "estudio",
         subscription: activateSubscription(
           sub ?? { status: "expired", startedAt: new Date().toISOString() },
-          { plan, setupMeetPending: plan === "setup" },
+          {
+            plan,
+            setupMeetPending: setupMeetPending ?? plan === "setup",
+          },
         ),
       },
     });
-    setMsg(plan === "setup" ? "Plan activo. Coordiná el meet." : "Plan Self activo.");
+    setMsg(plan === "setup" ? "Pago verificado. Plan activo — coordiná el meet." : "Pago verificado. Plan Self activo.");
+    setErr("");
   }
 
-  // Vuelta desde Mercado Pago: ?paid=1&plan=self|setup
+  async function confirmPaid(planHint?: SubscriptionPlan) {
+    const id = operationId.trim();
+    if (!id) {
+      setErr("Pegá el número de operación de Mercado Pago (pantalla de éxito).");
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    setMsg("");
+    const plan = planHint ?? pendingPlan ?? "self";
+    const result = await confirmMercadoPagoPayment(id, plan);
+    setBusy(false);
+    if (!result.ok) {
+      setErr(result.error || "No se pudo verificar el pago");
+      return;
+    }
+    applyActivation(result.plan ?? plan, result.setupMeetPending);
+  }
+
+  // Si vuelve con ?paid=1&op=ID — verificar automático
   useEffect(() => {
     const paid = params.get("paid") === "1" || params.get("status") === "approved";
+    const op = params.get("op") || params.get("operation") || "";
     const planParam = params.get("plan");
     const plan: SubscriptionPlan | null =
       planParam === "setup" || planParam === "self" ? planParam : readPendingPlan();
-    if (!paid || !plan) return;
-    if (sub?.status === "active") return;
-    onActivate(plan);
+    if (op) setOperationId(op);
+    if (!paid || !op || sub?.status === "active") return;
+    void (async () => {
+      setBusy(true);
+      const result = await confirmMercadoPagoPayment(op, plan ?? "self");
+      setBusy(false);
+      if (result.ok) applyActivation(result.plan ?? plan ?? "self", result.setupMeetPending);
+      else setErr(result.error || "No se pudo verificar");
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Si eligió un plan y vuelve del tab de MP, ofrecer confirmar
   useEffect(() => {
     function onFocus() {
       setPendingPlan(readPendingPlan());
@@ -91,6 +126,15 @@ export function Activar() {
     }
   }
 
+  // Solo demo local si no hay links MP (nunca en prod con checkout real)
+  function onDemoActivate(plan: SubscriptionPlan) {
+    if (checkoutSelfUrl() || checkoutSetupUrl()) {
+      setErr("Con Mercado Pago activo no se puede activar sin verificar el pago.");
+      return;
+    }
+    applyActivation(plan);
+  }
+
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div>
@@ -102,13 +146,13 @@ export function Activar() {
       </div>
 
       {msg ? <p className="text-sm text-gold">{msg}</p> : null}
+      {err ? <p className="text-sm text-danger">{err}</p> : null}
 
       {meetPending ? (
         <Card className="border-gold/40 bg-gold/5 p-6">
           <h2 className="font-serif text-2xl text-forest">Plan activo · coordinemos el setup</h2>
           <p className="mt-2 text-sm text-ink-soft">
-            Pagaste Setup completo. Escribime por WhatsApp y agendamos el meet para dejar Meta,
-            WhatsApp y cartera listos.
+            Pagaste Setup completo. Escribime por WhatsApp y agendamos el meet.
           </p>
           <Button variant="gold" className="mt-5 py-3" onClick={openMeet}>
             Abrir WhatsApp para coordinar
@@ -126,35 +170,46 @@ export function Activar() {
         </Card>
       ) : (
         <>
-          {pendingPlan ? (
-            <Card className="border-gold/40 bg-gold/5 p-5">
-              <p className="font-serif text-xl text-forest">¿Ya pagaste en Mercado Pago?</p>
-              <p className="mt-2 text-sm text-ink-soft">
-                Si el pago figura aprobado, activá el plan acá. Elegiste{" "}
-                <strong>{pendingPlan === "setup" ? "Setup completo" : "Self-service"}</strong>.
-              </p>
-              <Button variant="gold" className="mt-4 py-3" onClick={() => onActivate(pendingPlan)}>
-                Ya pagué — activar plan
+          <Card className="border-gold/40 bg-gold/5 p-5">
+            <p className="font-serif text-xl text-forest">Ya pagué — verificar</p>
+            <p className="mt-2 text-sm text-ink-soft">
+              En la pantalla verde de Mercado Pago aparece <strong>Operación</strong> (ej.{" "}
+              174755167318). Pegalo acá: Lía consulta a MP y solo activa si el pago es real.
+            </p>
+            <div className="mt-4">
+              <Field label="Número de operación MP">
+                <input
+                  className={inputClass}
+                  value={operationId}
+                  onChange={(e) => setOperationId(e.target.value)}
+                  placeholder="174755167318"
+                  inputMode="numeric"
+                />
+              </Field>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button
+                variant="ghost"
+                disabled={busy}
+                onClick={() => void confirmPaid("self")}
+              >
+                {busy ? "Verificando…" : "Verificar Self (49)"}
               </Button>
-            </Card>
-          ) : (
-            <Card className="border-line p-5">
-              <p className="font-medium text-forest">¿Ya pagaste y seguís bloqueado?</p>
-              <p className="mt-1 text-sm text-ink-soft">
-                Mercado Pago aprobó el pago pero a veces el aviso no llega. Activá acá según lo que
-                pagaste.
+              <Button
+                variant="gold"
+                disabled={busy}
+                onClick={() => void confirmPaid("setup")}
+              >
+                {busy ? "Verificando…" : "Verificar Setup (149)"}
+              </Button>
+            </div>
+            {pendingPlan ? (
+              <p className="mt-3 text-xs text-ink-soft">
+                Habías elegido: {pendingPlan === "setup" ? "Setup completo" : "Self-service"}.
               </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Button variant="ghost" onClick={() => onActivate("self")}>
-                  Activar Self (49)
-                </Button>
-                <Button variant="gold" onClick={() => onActivate("setup")}>
-                  Activar Setup (149)
-                </Button>
-              </div>
-            </Card>
-          )}
-          <CheckoutPlans producerName={state.producer.name} onActivate={onActivate} />
+            ) : null}
+          </Card>
+          <CheckoutPlans producerName={state.producer.name} onActivate={onDemoActivate} />
         </>
       )}
     </div>
