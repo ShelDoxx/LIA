@@ -346,7 +346,12 @@ export async function confirmByOperationId(opts: {
 
   const used = alreadyUsed(id || maybeUuid);
   if (used) {
-    return { ok: true, activation: used, detail: "already_active" };
+    // Un pago = una cuenta. Evita que Felipe y Fernando activen con el mismo cobro.
+    return {
+      ok: false,
+      detail:
+        "Este pago ya se usó para activar otra cuenta. Si fuiste vos, entrá con esa cuenta o pedí soporte.",
+    };
   }
 
   const headers = { Authorization: `Bearer ${opts.accessToken}` };
@@ -503,118 +508,26 @@ export async function confirmByOperationId(opts: {
 }
 
 /**
- * Tras volver del checkout (back_url), busca cobros/suscripciones recientes
- * aprobados en MP y los marca activos en Lía.
+ * Tras volver del checkout: SOLO con operationId (pago concreto).
+ * Ya no “agarra el cobro reciente” — eso activaba varias cuentas con el mismo pago.
  */
 export async function syncRecentApprovals(opts: {
   accessToken: string;
   plan?: BillingPlan;
   sinceIso?: string;
+  operationId?: string;
 }): Promise<{ ok: boolean; activation?: BillingActivation; detail?: string }> {
-  if (!opts.accessToken) return { ok: false, detail: "MP_ACCESS_TOKEN no configurado" };
-  const headers = { Authorization: `Bearer ${opts.accessToken}` };
-  const sinceMs = opts.sinceIso ? Date.parse(opts.sinceIso) : Date.now() - 24 * 60 * 60_000;
-  const since = Number.isFinite(sinceMs) ? sinceMs : Date.now() - 24 * 60 * 60_000;
-
-  // Primero: ya activado en el store (p.ej. webhook/sync anterior)
-  const fromStore = store.activations.find((a) => {
-    if (a.status !== "active") return false;
-    if (opts.plan && a.plan !== opts.plan) return false;
-    const t = Date.parse(a.updatedAt || a.createdAt);
-    return Number.isFinite(t) && t >= since - 60_000;
-  });
-  if (fromStore) return { ok: true, activation: fromStore, detail: "from_store" };
-
-  // 1) Suscripciones recientes
-  const preRes = await fetch("https://api.mercadopago.com/preapproval/search?limit=20", {
-    headers,
-  });
-  if (preRes.ok) {
-    const preData = (await preRes.json()) as {
-      results?: Array<{
-        id?: string;
-        status?: string;
-        reason?: string;
-        date_created?: string;
-        payer_email?: string;
-        external_reference?: string;
-        auto_recurring?: { transaction_amount?: number; currency_id?: string };
-      }>;
+  const op = (opts.operationId ?? "").trim();
+  if (!op) {
+    return {
+      ok: false,
+      detail:
+        "Para activar hace falta el número de operación de Mercado Pago. Así no se comparte un mismo pago entre cuentas.",
     };
-    for (const pre of preData.results ?? []) {
-      const created = pre.date_created ? Date.parse(pre.date_created) : 0;
-      if (created && created < since - 60_000) continue;
-      if (pre.status !== "authorized" && pre.status !== "active") continue;
-
-      // Exigir cobro aprobado (no alcanza con adhesión pending/cancelled)
-      let chargedOk = false;
-      let paymentId: string | undefined;
-      let amount = pre.auto_recurring?.transaction_amount;
-      if (pre.id) {
-        const apRes = await fetch(
-          `https://api.mercadopago.com/authorized_payments/search?preapproval_id=${pre.id}`,
-          { headers },
-        );
-        if (apRes.ok) {
-          const apData = (await apRes.json()) as {
-            results?: Array<{
-              payment?: { id?: number; status?: string };
-              transaction_amount?: number;
-              status?: string;
-            }>;
-          };
-          for (const row of apData.results ?? []) {
-            if (isPaymentApproved(row.payment?.status)) {
-              chargedOk = true;
-              paymentId = row.payment?.id ? String(row.payment.id) : undefined;
-              amount = row.transaction_amount ?? amount;
-              break;
-            }
-          }
-        }
-      }
-      if (!chargedOk) continue;
-
-      const plan =
-        opts.plan ??
-        detectPlan(amount, `${pre.external_reference ?? ""} ${pre.reason ?? ""}`);
-      if (paymentId) {
-        const used = alreadyUsed(paymentId);
-        if (used?.status === "active") return { ok: true, activation: used, detail: "already_active" };
-      }
-      if (pre.id) {
-        const usedPre = alreadyUsed(pre.id);
-        if (usedPre?.status === "active") {
-          return { ok: true, activation: usedPre, detail: "already_active" };
-        }
-      }
-
-      const activation: BillingActivation = {
-        id: crypto.randomUUID(),
-        plan,
-        status: "active",
-        email: pre.payer_email,
-        externalReference: pre.external_reference,
-        mpPaymentId: paymentId,
-        mpPreapprovalId: pre.id,
-        amount,
-        currency: pre.auto_recurring?.currency_id,
-        setupMeetPending: plan === "setup",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        rawType: "sync.preapproval",
-      };
-      upsert(activation);
-      console.log("[mp] sync preapproval", plan, pre.id);
-      return { ok: true, activation };
-    }
   }
-
-  // 2) Ya no hace falta buscar otra vez en store (se hizo al inicio)
-
-  return {
-    ok: false,
-    detail:
-      "Todavía no vemos un cobro aprobado reciente. Si acabás de pagar, esperá unos segundos o pegá el número de operación.",
-  };
+  return confirmByOperationId({
+    operationId: op,
+    accessToken: opts.accessToken,
+    claimedPlan: opts.plan,
+  });
 }

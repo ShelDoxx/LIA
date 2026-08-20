@@ -219,33 +219,18 @@ export async function confirmMercadoPagoPayment(
   }
 }
 
-/** Tras back_url ?paid=1: busca cobro aprobado reciente en MP. */
+/** Tras back_url: solo con operationId (nunca “último cobro reciente”). */
 export async function syncAfterCheckout(
   plan?: SubscriptionPlan,
   since?: string,
+  operationId?: string,
 ): Promise<{ ok: boolean; plan?: SubscriptionPlan; setupMeetPending?: boolean; error?: string }> {
-  try {
-    const { botUrl } = await import("@/lib/botBase");
-    const res = await fetch(botUrl("/billing/sync-after-checkout"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan, since: since || readCheckoutSince() }),
-    });
-    const data = (await res.json().catch(() => ({}))) as {
-      ok?: boolean;
-      plan?: SubscriptionPlan;
-      setupMeetPending?: boolean;
-      error?: string;
-    };
-    if (!res.ok || !data.ok) {
-      return { ok: false, error: data.error || "Sin cobro aprobado todavía" };
-    }
+  const op = (operationId || "").trim();
+  if (!op) {
     return {
-      ok: true,
-      plan: data.plan ?? plan ?? "self",
-      setupMeetPending: data.setupMeetPending,
+      ok: false,
+      error: "Pegá el número de operación para activar (un pago = una cuenta).",
     };
-  } catch {
-    return { ok: false, error: "No pude contactar al servidor de Lía" };
   }
+  return confirmMercadoPagoPayment(op, plan);
 }

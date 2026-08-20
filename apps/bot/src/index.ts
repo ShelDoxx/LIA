@@ -295,11 +295,13 @@ app.post("/billing/confirm", async (req, res) => {
 app.post("/billing/sync-after-checkout", async (req, res) => {
   const plan = req.body?.plan === "setup" ? "setup" : req.body?.plan === "self" ? "self" : undefined;
   const sinceIso = typeof req.body?.since === "string" ? req.body.since : undefined;
+  const operationId = String(req.body?.operationId ?? req.body?.op ?? "");
   try {
     const result = await syncRecentApprovals({
       accessToken: config.mpAccessToken,
       plan,
       sinceIso,
+      operationId,
     });
     if (!result.ok || !result.activation || result.activation.status !== "active") {
       res.status(404).json({ ok: false, error: result.detail || "Sin cobro aprobado todavía" });
