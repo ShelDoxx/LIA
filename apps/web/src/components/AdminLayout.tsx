@@ -42,7 +42,7 @@ export function AdminLayout() {
         </nav>
         <div className="space-y-2 border-t border-paper/10 p-4">
           <p className="truncate text-xs text-paper/50">{state.producer.email}</p>
-          <Link to="/" className="block text-xs text-gold underline">
+          <Link to="/escritorio" className="block text-xs text-gold underline">
             Abrir escritorio productor
           </Link>
           <button
@@ -66,7 +66,7 @@ export function AdminLayout() {
             <p className="font-serif text-xl text-forest">Panel de control</p>
           </div>
           <div className="flex items-center gap-2">
-            <Link to="/" className="hidden text-sm text-ink-soft underline sm:inline">
+            <Link to="/escritorio" className="hidden text-sm text-ink-soft underline sm:inline">
               Productor
             </Link>
             <Button variant="ghost" className="text-xs" onClick={() => void signOut()}>

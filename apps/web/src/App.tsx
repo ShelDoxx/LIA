@@ -98,7 +98,13 @@ export default function App() {
           </Guard>
         }
       >
-        <Route index element={<Lazy><Dashboard /></Lazy>} />
+        <Route
+          index
+          element={
+            isAdmin ? <Navigate to="/admin" replace /> : <Lazy><Dashboard /></Lazy>
+          }
+        />
+        <Route path="escritorio" element={<Lazy><Dashboard /></Lazy>} />
         <Route path="clientes" element={<Lazy><Clients /></Lazy>} />
         <Route path="clientes/:id" element={<Lazy><ClientProfile /></Lazy>} />
         <Route path="polizas" element={<Lazy><Policies /></Lazy>} />
