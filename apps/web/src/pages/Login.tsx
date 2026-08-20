@@ -69,13 +69,47 @@ const FAQ = [
 ] as const;
 
 export function Login() {
-  const { signIn, signInWithGoogle, firebaseEnabled } = useLia();
+  const { signIn, signInWithGoogle, firebaseEnabled, requestEmailOtp, verifyEmailOtp } = useLia();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [devCode, setDevCode] = useState<string | undefined>();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
   const [plan, setPlan] = useState<"demo" | "estudio">("estudio");
 
   function enterDemo() {
     void signIn("Productor demo", "demo@lia.app", "demo");
+  }
+
+  async function sendCode() {
+    setErr("");
+    if (!email.includes("@")) {
+      setErr("Ingresá un email válido");
+      return;
+    }
+    setBusy(true);
+    const r = await requestEmailOtp(email, name || undefined);
+    setBusy(false);
+    if (!r.ok) {
+      setErr(r.error || "No se pudo enviar el código");
+      return;
+    }
+    setOtpSent(true);
+    setDevCode(r.devCode);
+  }
+
+  async function confirmCode() {
+    setErr("");
+    if (!code.trim()) {
+      setErr("Ingresá el código de 6 dígitos");
+      return;
+    }
+    setBusy(true);
+    const r = await verifyEmailOtp(email, code.trim(), name || undefined);
+    setBusy(false);
+    if (!r.ok) setErr(r.error || "Código inválido");
   }
 
   return (
@@ -322,9 +356,11 @@ export function Login() {
                 enterDemo();
                 return;
               }
-              void signIn(name || "Productor", email || "vos@estudio.com", plan);
+              if (!otpSent) void sendCode();
+              else void confirmCode();
             }}
           >
+            {err ? <p className="text-sm text-danger">{err}</p> : null}
             {plan === "estudio" ? (
               <>
                 <Field label="Nombre del estudio">
@@ -333,6 +369,7 @@ export function Login() {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Tu nombre"
+                    disabled={otpSent}
                   />
                 </Field>
                 <Field label="Email">
@@ -342,8 +379,27 @@ export function Login() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="vos@estudio.com"
+                    disabled={otpSent}
+                    required
                   />
                 </Field>
+                {otpSent ? (
+                  <Field label="Código de 6 dígitos (revisá tu mail)">
+                    <input
+                      className={inputClass}
+                      value={code}
+                      onChange={(e) => setCode(e.target.value)}
+                      placeholder="123456"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                    />
+                  </Field>
+                ) : null}
+                {devCode ? (
+                  <p className="text-xs text-ink-soft">
+                    Modo prueba: tu código es <strong>{devCode}</strong>
+                  </p>
+                ) : null}
               </>
             ) : (
               <div className="rounded-xl border border-gold/30 bg-gold/10 px-4 py-3 text-sm text-forest">
@@ -359,10 +415,16 @@ export function Login() {
                       ? "border-forest bg-forest/5 text-forest"
                       : "border-line text-ink-soft hover:bg-paper-2"
                   }`}
-                  onClick={() => setPlan("estudio")}
+                  onClick={() => {
+                    setPlan("estudio");
+                    setOtpSent(false);
+                    setCode("");
+                    setDevCode(undefined);
+                    setErr("");
+                  }}
                 >
                   <span className="font-medium">Estudio</span>
-                  <span className="mt-0.5 block text-xs text-ink-soft">Cartera vacía + CSV</span>
+                  <span className="mt-0.5 block text-xs text-ink-soft">Email + código</span>
                 </button>
                 <button
                   type="button"
@@ -378,12 +440,12 @@ export function Login() {
                 </button>
               </div>
             </Field>
-            {firebaseEnabled && plan === "estudio" && (
+            {firebaseEnabled && plan === "estudio" && !otpSent && (
               <Button
                 type="button"
                 variant="ghost"
                 className="w-full py-3"
-                onClick={() => void signInWithGoogle(plan)}
+                onClick={() => void signInWithGoogle(plan).catch((e) => setErr(String(e.message || e)))}
               >
                 Continuar con Google
               </Button>
@@ -392,9 +454,27 @@ export function Login() {
               <Button type="submit" variant="gold" className="w-full py-3">
                 Abrir la Demo Interactiva · 60s
               </Button>
+            ) : otpSent ? (
+              <div className="space-y-2">
+                <Button type="submit" className="w-full py-3" disabled={busy}>
+                  {busy ? "Verificando…" : "Entrar con el código"}
+                </Button>
+                <button
+                  type="button"
+                  className="w-full text-sm text-ink-soft underline"
+                  onClick={() => {
+                    setOtpSent(false);
+                    setCode("");
+                    setDevCode(undefined);
+                    setErr("");
+                  }}
+                >
+                  Cambiar email
+                </button>
+              </div>
             ) : (
-              <Button type="submit" className="w-full py-3">
-                Entrar
+              <Button type="submit" className="w-full py-3" disabled={busy}>
+                {busy ? "Enviando…" : "Enviar código al email"}
               </Button>
             )}
           </form>

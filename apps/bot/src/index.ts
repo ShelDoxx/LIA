@@ -28,6 +28,15 @@ import {
   syncRecentApprovals,
   verifyMpWebhookSignature,
 } from "./mercadopago.js";
+import {
+  createOtp,
+  listUsers,
+  loginWithVerifiedEmail,
+  revokeSession,
+  sessionFromToken,
+  verifyOtp,
+} from "./auth.js";
+import { sendOtpEmail } from "./mail.js";
 
 const app = express();
 
@@ -44,7 +53,7 @@ app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
   }
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Lia-Secret");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Lia-Secret, Authorization");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   if (req.method === "OPTIONS") {
     res.sendStatus(204);
@@ -54,6 +63,111 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
+
+function bearerToken(req: express.Request): string | undefined {
+  const h = req.headers.authorization;
+  if (typeof h === "string" && h.toLowerCase().startsWith("bearer ")) {
+    return h.slice(7).trim();
+  }
+  return undefined;
+}
+
+app.post("/auth/request-otp", async (req, res) => {
+  const email = String(req.body?.email ?? "");
+  const name = typeof req.body?.name === "string" ? req.body.name : undefined;
+  try {
+    const otp = createOtp(email);
+    const sent = await sendOtpEmail({
+      to: otp.email,
+      code: otp.code,
+      resendApiKey: config.resendApiKey,
+      from: config.emailFrom,
+      devMode: config.emailDevMode,
+    });
+    if (!sent.ok && !config.emailDevMode) {
+      res.status(503).json({
+        ok: false,
+        error: "No pudimos enviar el email. Configurá RESEND_API_KEY o EMAIL_DEV_MODE.",
+      });
+      return;
+    }
+    console.log("[auth] otp requested", otp.email, name ?? "", sent.detail);
+    res.json({
+      ok: true,
+      email: otp.email,
+      expiresInSec: 600,
+      ...(config.emailDevMode ? { devCode: otp.code } : {}),
+    });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err instanceof Error ? err.message : "Email inválido" });
+  }
+});
+
+app.post("/auth/verify-otp", (req, res) => {
+  const email = String(req.body?.email ?? "");
+  const code = String(req.body?.code ?? "");
+  const name = typeof req.body?.name === "string" ? req.body.name : undefined;
+  const result = verifyOtp({ email, code, name });
+  if (!result.ok) {
+    res.status(401).json({ ok: false, error: result.error });
+    return;
+  }
+  res.json({
+    ok: true,
+    sessionToken: result.sessionToken,
+    user: { id: result.user.id, email: result.user.email, name: result.user.name },
+    entitlement: result.entitlement,
+  });
+});
+
+app.post("/auth/session-google", (req, res) => {
+  const email = String(req.body?.email ?? "");
+  const name = typeof req.body?.name === "string" ? req.body.name : undefined;
+  const firebaseUid = typeof req.body?.firebaseUid === "string" ? req.body.firebaseUid : undefined;
+  if (!email.includes("@")) {
+    res.status(400).json({ ok: false, error: "Email inválido" });
+    return;
+  }
+  const result = loginWithVerifiedEmail({ email, name, firebaseUid });
+  res.json({
+    ok: true,
+    sessionToken: result.sessionToken,
+    user: { id: result.user.id, email: result.user.email, name: result.user.name },
+    entitlement: result.entitlement,
+  });
+});
+
+app.get("/auth/me", (req, res) => {
+  const sess = sessionFromToken(bearerToken(req));
+  if (!sess) {
+    res.status(401).json({ ok: false, error: "Sesión inválida" });
+    return;
+  }
+  const isAdmin = config.adminEmails.includes(sess.user.email);
+  res.json({
+    ok: true,
+    user: { id: sess.user.id, email: sess.user.email, name: sess.user.name },
+    entitlement: sess.entitlement,
+    isAdmin,
+  });
+});
+
+app.post("/auth/logout", (req, res) => {
+  revokeSession(bearerToken(req));
+  res.json({ ok: true });
+});
+
+app.get("/auth/admin/users", (req, res) => {
+  const secret = req.headers["x-lia-secret"];
+  const sess = sessionFromToken(bearerToken(req));
+  const adminOk =
+    secret === config.liaSecret || (sess && config.adminEmails.includes(sess.user.email));
+  if (!adminOk) {
+    res.sendStatus(401);
+    return;
+  }
+  res.json({ ok: true, users: listUsers() });
+});
 
 const demoClient: BotClient = {
   firstName: "",

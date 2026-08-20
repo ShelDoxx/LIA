@@ -50,6 +50,13 @@ import { pullPendingBotDocs } from "@/lib/botDocsSync";
 import { cloudSyncAvailable, loadStateFromCloud, saveStateToCloud } from "@/lib/cloudSync";
 import { auth, firebaseEnabled } from "@/lib/firebase";
 import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import {
+  fetchAuthMe,
+  logoutSession,
+  requestOtp,
+  sessionFromGoogle,
+  verifyOtp,
+} from "@/lib/authApi";
 
 const KEY = "lia-state-v7";
 const AUTH_KEY = "lia-auth";
@@ -187,8 +194,16 @@ type LiaContextValue = {
   state: LiaState;
   firebaseEnabled: boolean;
   signedIn: boolean;
+  isAdmin: boolean;
+  entitlementStatus: "none" | "trial" | "active" | "expired" | null;
   signIn: (name?: string, email?: string, plan?: "demo" | "estudio") => Promise<void>;
   signInWithGoogle: (plan?: "demo" | "estudio") => Promise<void>;
+  requestEmailOtp: (email: string, name?: string) => Promise<{ ok: boolean; error?: string; devCode?: string }>;
+  verifyEmailOtp: (
+    email: string,
+    code: string,
+    name?: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
   signOut: () => Promise<void>;
   save: (next: LiaState) => Promise<void>;
   restoreState: (next: LiaState) => Promise<void>;
@@ -260,6 +275,10 @@ async function withWhatsAppOutbound(
 export function LiaProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<LiaState | null>(null);
   const [signedIn, setSignedIn] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [entitlementStatus, setEntitlementStatus] = useState<
+    "none" | "trial" | "active" | "expired" | null
+  >(null);
   const [ready, setReady] = useState(false);
   const [isProcessingMedia, setIsProcessingMedia] = useState(false);
   const stateRef = useRef<LiaState | null>(null);
@@ -268,46 +287,76 @@ export function LiaProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     void (async () => {
       const next = await hydrateState();
-      const auth = await hydrateAuth();
+      const authFlag = await hydrateAuth();
       if (cancelled) return;
 
       let finalState = next;
-      if (auth) {
-        const { state: afterDaily, outbound } = runDailyAutomations(next);
+      let allowIn = Boolean(authFlag);
+
+      if (authFlag) {
+        // Estudio exige sesión OTP/Google en el bot; demo puede usar solo flag local
+        const me = await fetchAuthMe();
+        if (me.ok) {
+          setIsAdmin(me.isAdmin);
+          setEntitlementStatus(me.entitlement?.status ?? "none");
+          finalState = {
+            ...finalState,
+            producer: {
+              ...finalState.producer,
+              liaUserId: me.user.id,
+              email: me.user.email || finalState.producer.email,
+              name: finalState.producer.name || me.user.name,
+            },
+          };
+          // Si el bot dice active y local no, alinear paywall local
+          if (me.entitlement?.status === "active" && finalState.producer.subscription?.status !== "active") {
+            finalState = {
+              ...finalState,
+              producer: {
+                ...finalState.producer,
+                plan: "estudio",
+                subscription: {
+                  status: "active",
+                  startedAt: finalState.producer.subscription?.startedAt || new Date().toISOString(),
+                  plan: me.entitlement.plan,
+                },
+              },
+            };
+          }
+        } else if (finalState.producer.plan === "estudio") {
+          // Sesión local sin token válido → sacar
+          allowIn = false;
+          await del(AUTH_KEY);
+          await logoutSession();
+          setIsAdmin(false);
+          setEntitlementStatus(null);
+        }
+      }
+
+      if (allowIn) {
+        const { state: afterDaily, outbound } = runDailyAutomations(finalState);
         finalState = afterDaily;
         const health = await fetchBotHealth();
         if (health.ok !== finalState.bot.connected) {
           finalState = { ...finalState, bot: { ...finalState.bot, connected: health.ok } };
         }
+        if (finalState.bot.metaAccessToken || finalState.bot.metaPhoneNumberId) {
+          await pushMetaConfigToBot(finalState.bot);
+        }
         finalState = await withWhatsAppOutbound(finalState, outbound);
         finalState = await pullPendingBotDocs(finalState);
-        if (
-          afterDaily.lastDailyRun !== next.lastDailyRun ||
-          afterDaily.lastDailySent ||
-          health.ok !== next.bot.connected ||
-          finalState.lastWaSent
-        ) {
-          try {
-            await set(KEY, finalState);
-          } catch {
-            try {
-              await set(KEY, slimForStorage(finalState));
-            } catch {
-              /* quota */
-            }
-          }
-        }
-        void syncBotContext(finalState);
+        await persist(finalState);
       }
 
-      stateRef.current = finalState;
+      if (cancelled) return;
       setState(finalState);
-      setSignedIn(auth);
+      setSignedIn(allowIn);
       setReady(true);
     })();
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const persist = async (next: LiaState) => {
@@ -427,23 +476,23 @@ export function LiaProvider({ children }: { children: ReactNode }) {
       state,
       firebaseEnabled,
       signedIn,
+      isAdmin,
+      entitlementStatus,
       isProcessingMedia,
       signIn: async (name, email, plan) => {
-        let next: LiaState =
-          plan === "estudio"
-            ? estudioState({
-                name: name || "Productor",
-                email: email || "",
-              })
-            : {
-                ...seedState(),
-                producer: {
-                  ...seedState().producer,
-                  name: name || "Productor demo",
-                  email: email || "demo@lia.app",
-                  plan: "demo",
-                },
-              };
+        // Solo demo entra sin OTP. Estudio usa requestEmailOtp + verifyEmailOtp.
+        if (plan === "estudio") {
+          throw new Error("Estudio requiere verificación por email");
+        }
+        let next: LiaState = {
+          ...seedState(),
+          producer: {
+            ...seedState().producer,
+            name: name || "Productor demo",
+            email: email || "demo@lia.app",
+            plan: "demo",
+          },
+        };
         const { state: afterDaily, outbound } = runDailyAutomations(next);
         next = afterDaily;
         if (next.bot.metaAccessToken || next.bot.metaPhoneNumberId) {
@@ -453,29 +502,80 @@ export function LiaProvider({ children }: { children: ReactNode }) {
         next = await pullPendingBotDocs(next);
         await persist(next);
         await set(AUTH_KEY, "1");
+        setEntitlementStatus(null);
+        setIsAdmin(false);
         setSignedIn(true);
+      },
+      requestEmailOtp: async (email, name) => {
+        const r = await requestOtp(email, name);
+        if (!r.ok) return { ok: false, error: r.error };
+        return { ok: true, devCode: r.devCode };
+      },
+      verifyEmailOtp: async (email, code, name) => {
+        const r = await verifyOtp(email, code, name);
+        if (!r.ok) return { ok: false, error: r.error };
+        const current = currentOf();
+        let next: LiaState =
+          current.producer.email === r.user.email && current.producer.plan === "estudio"
+            ? {
+                ...current,
+                producer: {
+                  ...current.producer,
+                  liaUserId: r.user.id,
+                  name: name?.trim() || current.producer.name || r.user.name,
+                  email: r.user.email,
+                },
+              }
+            : estudioState({
+                name: name?.trim() || r.user.name,
+                email: r.user.email,
+                liaUserId: r.user.id,
+              });
+        if (r.entitlement?.status === "active") {
+          next = {
+            ...next,
+            producer: {
+              ...next.producer,
+              subscription: {
+                status: "active",
+                startedAt: next.producer.subscription?.startedAt || new Date().toISOString(),
+                plan: r.entitlement.plan,
+              },
+            },
+          };
+        }
+        const { state: afterDaily, outbound } = runDailyAutomations(next);
+        next = afterDaily;
+        if (next.bot.metaAccessToken || next.bot.metaPhoneNumberId) {
+          await pushMetaConfigToBot(next.bot);
+        }
+        next = await withWhatsAppOutbound(next, outbound);
+        next = await pullPendingBotDocs(next);
+        await persist(next);
+        await set(AUTH_KEY, "1");
+        setEntitlementStatus(r.entitlement?.status ?? "none");
+        setIsAdmin(false);
+        setSignedIn(true);
+        const me = await fetchAuthMe();
+        if (me.ok) setIsAdmin(me.isAdmin);
+        return { ok: true };
       },
       signInWithGoogle: async (plan) => {
         const current = currentOf();
         const chosen = plan ?? "estudio";
         if (!auth || !firebaseEnabled) {
-          let next: LiaState =
-            chosen === "estudio"
-              ? estudioState({ name: "Productor", email: "" })
-              : {
-                  ...seedState(),
-                  producer: { ...seedState().producer, plan: "demo" },
-                };
-          const { state: afterDaily, outbound } = runDailyAutomations(next);
-          next = await withWhatsAppOutbound(afterDaily, outbound);
-          next = await pullPendingBotDocs(next);
-          await persist(next);
-          await set(AUTH_KEY, "1");
-          setSignedIn(true);
-          return;
+          throw new Error("Google Auth no está configurado");
         }
         const cred = await signInWithPopup(auth, new GoogleAuthProvider());
         const user = cred.user;
+        if (!user.email) throw new Error("Google no devolvió email");
+        const sess = await sessionFromGoogle({
+          email: user.email,
+          name: user.displayName ?? undefined,
+          firebaseUid: user.uid,
+        });
+        if (!sess.ok) throw new Error(sess.error || "No se pudo crear sesión");
+
         const cloud = await loadStateFromCloud(user.uid);
         let next: LiaState;
         if (cloud) {
@@ -485,8 +585,9 @@ export function LiaProvider({ children }: { children: ReactNode }) {
             producer: {
               ...next.producer,
               name: user.displayName ?? next.producer.name,
-              email: user.email ?? next.producer.email,
+              email: user.email,
               firebaseUid: user.uid,
+              liaUserId: sess.user.id,
               plan: chosen ?? next.producer.plan,
             },
           };
@@ -496,27 +597,48 @@ export function LiaProvider({ children }: { children: ReactNode }) {
             producer: {
               ...current.producer,
               name: user.displayName ?? current.producer.name,
-              email: user.email ?? current.producer.email,
+              email: user.email,
               firebaseUid: user.uid,
+              liaUserId: sess.user.id,
               plan: "demo",
             },
           };
         } else {
           next = estudioState({
             name: user.displayName ?? "Productor",
-            email: user.email ?? "",
+            email: user.email,
             firebaseUid: user.uid,
+            liaUserId: sess.user.id,
           });
+        }
+        if (sess.entitlement?.status === "active") {
+          next = {
+            ...next,
+            producer: {
+              ...next.producer,
+              subscription: {
+                status: "active",
+                startedAt: next.producer.subscription?.startedAt || new Date().toISOString(),
+                plan: sess.entitlement.plan,
+              },
+            },
+          };
         }
         const { state: afterDaily, outbound } = runDailyAutomations(next);
         next = await withWhatsAppOutbound(afterDaily, outbound);
         next = await pullPendingBotDocs(next);
         await persist(next);
         await set(AUTH_KEY, "1");
+        setEntitlementStatus(sess.entitlement?.status ?? "none");
+        const me = await fetchAuthMe();
+        setIsAdmin(me.ok ? me.isAdmin : false);
         setSignedIn(true);
       },
       signOut: async () => {
+        await logoutSession();
         await del(AUTH_KEY);
+        setIsAdmin(false);
+        setEntitlementStatus(null);
         setSignedIn(false);
       },
       save: persist,
@@ -1009,7 +1131,7 @@ export function LiaProvider({ children }: { children: ReactNode }) {
         });
       },
     };
-  }, [state, signedIn, isProcessingMedia]);
+  }, [state, signedIn, isProcessingMedia, isAdmin, entitlementStatus]);
 
   if (!ready || !state || !value) {
     return (

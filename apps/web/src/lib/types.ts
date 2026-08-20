@@ -30,6 +30,8 @@ export type Producer = {
   activeRamos: PolicyType[];
   subscription?: Subscription;
   firebaseUid?: string;
+  /** ID de usuario en el bot (OTP / sesión Lía) */
+  liaUserId?: string;
 };
 
 export type QuotePipeline = "general" | "vida";

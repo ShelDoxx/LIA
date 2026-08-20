@@ -28,6 +28,17 @@ export const config = {
   mpBackUrlBase: process.env.MP_BACK_URL_BASE ?? "https://app.lia-estudio.com/activar",
   /** Forzar firma Meta (set REQUIRE_META_SIGNATURE=true en el server) */
   requireMetaSignature: process.env.REQUIRE_META_SIGNATURE === "true",
+  /** Resend API key para OTP por email */
+  resendApiKey: process.env.RESEND_API_KEY ?? "",
+  /** Remitente Resend (dominio verificado) */
+  emailFrom: process.env.EMAIL_FROM ?? "Lía <onboarding@resend.dev>",
+  /** Sin Resend: loguea el código en el server (solo pruebas) */
+  emailDevMode: process.env.EMAIL_DEV_MODE === "true",
+  /** Emails admin (comma-separated) */
+  adminEmails: (process.env.ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean),
 };
 
 export function isConfigured() {
