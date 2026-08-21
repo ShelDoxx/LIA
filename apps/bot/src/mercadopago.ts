@@ -362,8 +362,13 @@ export async function handleMercadoPagoNotification(opts: {
     const amount = data.transaction_amount;
     const plan = detectPlan(amount, `${data.external_reference ?? ""} ${data.description ?? ""}`);
     let status: BillingActivation["status"] = "pending";
-    if (isPaymentApproved(data.status)) status = "active";
+    // Ignorar validaciones MP / montos basura (p.ej. $0) — no desbloquean Estudio.
+    const amountOk = typeof amount === "number" && amount >= 1;
+    if (isPaymentApproved(data.status) && amountOk) status = "active";
     else if (isDeadPaymentStatus(data.status)) status = "cancelled";
+    else if (isPaymentApproved(data.status) && !amountOk) {
+      console.log("[mp] payment approved ignorado (monto inválido)", amount, id);
+    }
     const activation: BillingActivation = {
       id: crypto.randomUUID(),
       plan,

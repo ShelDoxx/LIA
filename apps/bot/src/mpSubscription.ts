@@ -8,7 +8,6 @@
  * - POST /v1/customers · POST /v1/customers/{id}/cards
  */
 import type { BrickAmounts, BillingPlan } from "./mpBrickTypes.js";
-import { waitForApprovedCharge } from "./mercadopago.js";
 
 export type CardForm = {
   token: string;
@@ -240,51 +239,24 @@ export async function processBrickCheckout(opts: {
     email,
   });
 
-  if (opts.plan === "self") {
-    // Suscripción mensual: MP guarda la tarjeta en el preapproval y cobra solo.
-    const created = await createMonthlyPreapproval({
-      accessToken: opts.accessToken,
-      userId: opts.userId,
-      email,
-      amounts: opts.amounts,
-      backUrl: opts.backUrl,
-      cardTokenId: opts.card.token,
-      startNextMonth: false,
-    });
-    if (!created.ok || !created.preapprovalId) {
-      return { ok: false, detail: created.detail || "No se pudo crear la suscripción" };
-    }
-    const charge = await waitForApprovedCharge(created.preapprovalId, opts.accessToken);
-    if (!charge) {
-      return {
-        ok: false,
-        detail:
-          "La suscripción se creó pero Mercado Pago aún no acreditó el cobro. Esperá unos segundos y verificá, o reintentá.",
-        mpPreapprovalId: created.preapprovalId,
-        mpCustomerId: customerId,
-      };
-    }
-    return {
-      ok: true,
-      plan: "self",
-      setupMeetPending: false,
-      mpPreapprovalId: created.preapprovalId,
-      mpPaymentId: charge.paymentId,
-      mpCustomerId: customerId,
-      amount: charge.amount ?? opts.amounts.arsSelf,
-      detail: "subscription_charged",
-    };
-  }
-
-  // Setup: 1er mes (pago único) + enganche de suscripción 49/mes
+  /**
+   * Self y Setup: cobrar YA con /v1/payments (approved inmediato).
+   * El preapproval de MP demora ~1h en el 1er authorized_payment — no sirve
+   * para desbloquear acceso en el checkout.
+   * Después enganchamos suscripción mensual con start_date = +1 mes.
+   */
+  const isSetup = opts.plan === "setup";
+  const amount = isSetup ? opts.amounts.arsSetup : opts.amounts.arsSelf;
   const paymentBody: Record<string, unknown> = {
-    transaction_amount: opts.amounts.arsSetup,
+    transaction_amount: amount,
     token: opts.card.token,
-    description: `Lía Estudio — Setup USD ${opts.amounts.usdSetup} (1er mes)`,
+    description: isSetup
+      ? `Lía Estudio — Setup USD ${opts.amounts.usdSetup} (1er mes)`
+      : `Lía Estudio — Self USD ${opts.amounts.usdSelf}/mes`,
     installments: Number(opts.card.installments || 1),
     payment_method_id: opts.card.payment_method_id,
     external_reference: opts.userId,
-    metadata: { lia_plan: "setup", lia_user_id: opts.userId },
+    metadata: { lia_plan: opts.plan, lia_user_id: opts.userId },
     payer: {
       email,
       identification: opts.card.payer?.identification,
@@ -298,12 +270,12 @@ export async function processBrickCheckout(opts: {
     body: JSON.stringify(paymentBody),
   });
   if (!pay.ok) {
-    console.error("[mp] payment setup", pay.status, JSON.stringify(pay.json).slice(0, 500));
+    console.error("[mp] payment", opts.plan, pay.status, JSON.stringify(pay.json).slice(0, 500));
     return {
       ok: false,
       detail:
         (typeof pay.json.message === "string" && pay.json.message) ||
-        "No se pudo cobrar el Setup",
+        (isSetup ? "No se pudo cobrar el Setup" : "No se pudo cobrar el plan Self"),
     };
   }
   const payStatus = String(pay.json.status ?? "").toLowerCase();
@@ -342,24 +314,30 @@ export async function processBrickCheckout(opts: {
       backUrl: opts.backUrl,
       cardId,
       startNextMonth: true,
-      reasonSuffix: " (post-setup)",
+      reasonSuffix: isSetup ? " (post-setup)" : " (post-self)",
     });
     if (sub.ok) preapprovalId = sub.preapprovalId;
-    else console.warn("[mp] setup paid but monthly sub failed", sub.detail);
+    else console.warn("[mp]", opts.plan, "paid but monthly sub failed", sub.detail);
   } else {
-    console.warn("[mp] setup paid — sin card_id; el usuario debe enganchar el cobro mensual");
+    console.warn("[mp]", opts.plan, "paid — sin card_id; falta enganche mensual");
   }
 
   return {
     ok: true,
-    plan: "setup",
-    setupMeetPending: true,
+    plan: opts.plan,
+    setupMeetPending: isSetup,
     mpPaymentId: paymentId,
     mpPreapprovalId: preapprovalId,
     mpCustomerId: customerId,
     cardLastFour: lastFour,
-    amount: opts.amounts.arsSetup,
-    detail: preapprovalId ? "setup_paid_and_subscribed" : "setup_paid",
+    amount,
+    detail: isSetup
+      ? preapprovalId
+        ? "setup_paid_and_subscribed"
+        : "setup_paid"
+      : preapprovalId
+        ? "self_paid_and_subscribed"
+        : "self_paid",
     needsCardForMonthly: !preapprovalId,
   };
 }
