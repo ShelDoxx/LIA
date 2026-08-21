@@ -20,6 +20,8 @@ export type Entitlement = {
   mpPreapprovalId?: string;
   mpCustomerId?: string;
   cardLastFour?: string;
+  /** Primer alta / inicio del ciclo de facturación (aniversario mensual). */
+  membershipStartedAt?: string;
   /** Fin del período pagado (ISO). Al vencer → expired. */
   periodEndsAt?: string;
   /** Debe renovar / cargar tarjeta antes de periodEndsAt */
@@ -98,16 +100,39 @@ export function computePeriodEndsAt(opts: {
   return d.toISOString();
 }
 
-/** Fin de acceso tras cancelar / fallar cobro: período ya pago, no 3 días fijos. */
+/**
+ * Próximo aniversario del día exacto en que empezó la membresía
+ * (ej. alta 21-ago → si cancelás el 5-sep, acceso hasta 21-sep).
+ */
+export function nextBillingAnniversary(startedAt: string, from = new Date()): string {
+  const start = new Date(startedAt);
+  if (Number.isNaN(start.getTime())) {
+    return computePeriodEndsAt({ periodDays: 30, from });
+  }
+  const end = new Date(start.getTime());
+  // Avanzar de a un mes desde el alta hasta pasar "from"
+  let guard = 0;
+  while (end.getTime() <= from.getTime() && guard < 120) {
+    end.setMonth(end.getMonth() + 1);
+    guard += 1;
+  }
+  return end.toISOString();
+}
+
+/** Fin de acceso tras cancelar / fallar cobro: fin del ciclo ya pago. */
 export function paidPeriodEndsAt(opts: {
   existingPeriodEndsAt?: string;
   nextPaymentDate?: string;
+  membershipStartedAt?: string;
   periodDays: number;
 }): string {
   const existing = opts.existingPeriodEndsAt;
   if (existing && new Date(existing).getTime() > Date.now()) return existing;
   const next = opts.nextPaymentDate;
   if (next && new Date(next).getTime() > Date.now()) return new Date(next).toISOString();
+  if (opts.membershipStartedAt) {
+    return nextBillingAnniversary(opts.membershipStartedAt);
+  }
   return computePeriodEndsAt({ periodDays: Math.max(1, opts.periodDays) });
 }
 
@@ -161,6 +186,10 @@ export function patchEntitlement(
       Object.entries(rest).filter(([, v]) => v !== undefined),
     ),
     userId,
+    membershipStartedAt:
+      prev.membershipStartedAt ||
+      (typeof rest.membershipStartedAt === "string" ? rest.membershipStartedAt : undefined) ||
+      new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   } as Entitlement;
   if (clearPeriodEndsAt) delete next.periodEndsAt;

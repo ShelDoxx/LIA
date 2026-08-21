@@ -467,6 +467,7 @@ app.post("/mercadopago/webhook", async (req, res) => {
         const periodEndsAt = paidPeriodEndsAt({
           existingPeriodEndsAt: prev?.periodEndsAt,
           nextPaymentDate,
+          membershipStartedAt: prev?.membershipStartedAt,
           periodDays: config.billingPeriodDays,
         });
         patchEntitlement(userId, {
@@ -739,6 +740,7 @@ app.post("/billing/cancel-subscription", async (req, res) => {
   const periodEndsAt = paidPeriodEndsAt({
     existingPeriodEndsAt: prev?.periodEndsAt,
     nextPaymentDate: pre.nextPaymentDate,
+    membershipStartedAt: prev?.membershipStartedAt,
     periodDays: config.billingPeriodDays,
   });
   patchEntitlement(sess.user.id, {

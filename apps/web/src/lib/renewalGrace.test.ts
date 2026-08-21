@@ -51,4 +51,23 @@ describe("renewal grace period", () => {
     const end = computePeriodEndsAt({ periodDays: 30, testGraceMinutes: 3, from });
     expect(graceLabelUntil(end, from.getTime())).toBe("3 minutos");
   });
+
+  it("aniversario: cancelá a mitad de mes → fin el día exacto del alta", () => {
+    // Alta 21 ago; cancelación 5 sep → acceso hasta 21 sep
+    const started = "2026-08-21T15:00:00.000Z";
+    const from = new Date("2026-09-05T12:00:00.000Z");
+    const end = nextBillingAnniversary(started, from);
+    expect(end.startsWith("2026-09-21")).toBe(true);
+  });
 });
+
+function nextBillingAnniversary(startedAt: string, from = new Date()): string {
+  const start = new Date(startedAt);
+  const end = new Date(start.getTime());
+  let guard = 0;
+  while (end.getTime() <= from.getTime() && guard < 120) {
+    end.setMonth(end.getMonth() + 1);
+    guard += 1;
+  }
+  return end.toISOString();
+}
