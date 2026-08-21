@@ -29,15 +29,26 @@ import {
   verifyMpWebhookSignature,
 } from "./mercadopago.js";
 import {
+  computePeriodEndsAt,
   createOtp,
+  findUserIdByPreapprovalId,
+  getUserById,
   listUsers,
+  paidPeriodEndsAt,
+  patchEntitlement,
   revokeSession,
   sessionFromToken,
+  toEntitlementView,
   upsertEntitlement,
   verifyOtp,
   type EntitlementStatus,
 } from "./auth.js";
 import { sendOtpEmail } from "./mail.js";
+import { computeBrickAmounts, processBrickCheckout, attachMonthlyWithCard } from "./mpBrick.js";
+import {
+  cancelPreapproval,
+  fetchPreapproval,
+} from "./mpSubscription.js";
 
 const app = express();
 
@@ -191,16 +202,64 @@ app.post("/auth/admin/entitlement", (req, res) => {
     res.status(404).json({ ok: false, error: "Usuario no encontrado" });
     return;
   }
+  const periodEndsAt =
+    typeof req.body?.periodEndsAt === "string" && req.body.periodEndsAt
+      ? String(req.body.periodEndsAt)
+      : req.body?.periodEndsAt === null
+        ? undefined
+        : prev.entitlement.periodEndsAt;
+  const renewalRequired =
+    typeof req.body?.renewalRequired === "boolean"
+      ? req.body.renewalRequired
+      : prev.entitlement.renewalRequired;
   upsertEntitlement({
     userId,
     status,
     plan: plan ?? prev.entitlement.plan,
     mpPaymentId: prev.entitlement.mpPaymentId,
     mpPreapprovalId: prev.entitlement.mpPreapprovalId,
+    mpCustomerId: prev.entitlement.mpCustomerId,
+    cardLastFour: prev.entitlement.cardLastFour,
+    periodEndsAt,
+    renewalRequired,
     updatedAt: new Date().toISOString(),
   });
   console.log("[auth] admin entitlement", sess?.user.email ?? "secret", userId, status, plan);
-  res.json({ ok: true, entitlement: listUsers().find((u) => u.id === userId)?.entitlement });
+  res.json({
+    ok: true,
+    entitlement: listUsers().find((u) => u.id === userId)?.entitlement,
+  });
+});
+
+/**
+ * Solo admin: simula gracia corta (aviso + bloqueo) sin borrar la suscripción MP.
+ * Body: { minutes?: number, userId?: string }
+ */
+app.post("/billing/simulate-renewal-grace", (req, res) => {
+  const sess = sessionFromToken(bearerToken(req));
+  if (!sess || !config.adminEmails.includes(sess.user.email)) {
+    res.status(401).json({ ok: false, error: "Solo admin" });
+    return;
+  }
+  const targetId =
+    typeof req.body?.userId === "string" && req.body.userId
+      ? String(req.body.userId)
+      : sess.user.id;
+  const minutes = Math.max(1, Math.min(60 * 24, Number(req.body?.minutes ?? 3)));
+  const periodEndsAt = computePeriodEndsAt({
+    periodDays: 30,
+    testGraceMinutes: minutes,
+  });
+  const prev = listUsers().find((u) => u.id === targetId)?.entitlement;
+  patchEntitlement(targetId, {
+    status: "active",
+    plan: prev?.plan ?? "setup",
+    periodEndsAt,
+    renewalRequired: true,
+  });
+  const view = toEntitlementView(listUsers().find((u) => u.id === targetId)!.entitlement);
+  console.log("[billing] simulate-renewal-grace", targetId, periodEndsAt, view.graceLabel);
+  res.json({ ok: true, entitlement: view, periodEndsAt, minutes });
 });
 
 const demoClient: BotClient = {
@@ -373,26 +432,68 @@ app.post("/mercadopago/webhook", async (req, res) => {
   try {
     const topic = String(req.query.topic ?? req.query.type ?? body?.type ?? "");
     const id = String(req.query.id ?? req.query["data.id"] ?? dataId);
-    await handleMercadoPagoNotification({
+    const result = await handleMercadoPagoNotification({
       topic,
       id,
       body,
       accessToken: config.mpAccessToken,
     });
+    const act = result.activation;
+    const userId =
+      (act?.externalReference && getUserById(act.externalReference)?.id) ||
+      (act?.mpPreapprovalId && findUserIdByPreapprovalId(act.mpPreapprovalId)) ||
+      undefined;
+    if (act && userId) {
+      const prev = listUsers().find((u) => u.id === userId)?.entitlement;
+      if (act.status === "active") {
+        patchEntitlement(userId, {
+          status: "active",
+          plan: act.plan ?? prev?.plan,
+          mpPaymentId: act.mpPaymentId ?? prev?.mpPaymentId,
+          mpPreapprovalId: act.mpPreapprovalId ?? prev?.mpPreapprovalId,
+          renewalRequired: false,
+          clearPeriodEndsAt: true,
+        });
+        console.log("[mp] webhook → entitlement", userId, act.plan);
+      } else if (act.status === "cancelled") {
+        let nextPaymentDate: string | undefined;
+        if (act.mpPreapprovalId && config.mpAccessToken) {
+          const pre = await fetchPreapproval({
+            accessToken: config.mpAccessToken,
+            preapprovalId: act.mpPreapprovalId,
+          });
+          nextPaymentDate = pre.nextPaymentDate;
+        }
+        const periodEndsAt = paidPeriodEndsAt({
+          existingPeriodEndsAt: prev?.periodEndsAt,
+          nextPaymentDate,
+          periodDays: config.billingPeriodDays,
+        });
+        patchEntitlement(userId, {
+          status: "active",
+          plan: prev?.plan ?? act.plan,
+          mpPaymentId: prev?.mpPaymentId ?? act.mpPaymentId,
+          mpPreapprovalId: act.mpPreapprovalId ?? prev?.mpPreapprovalId,
+          periodEndsAt,
+          renewalRequired: true,
+        });
+        console.log("[mp] webhook → renewal grace", userId, periodEndsAt);
+      }
+    }
   } catch (err) {
     console.error("[mp] webhook error", err);
   }
 });
 
 app.get("/mercadopago/webhook", async (req, res) => {
-  // IPN clásico / healthcheck de MP
+  // IPN clásico / healthcheck — no muta entitlements (usar POST firmado).
   try {
     const result = await handleMercadoPagoNotification({
       topic: String(req.query.topic ?? ""),
       id: String(req.query.id ?? ""),
       accessToken: config.mpAccessToken,
     });
-    res.json(result);
+    res.json({ ok: result.ok, detail: result.detail ?? "ipn_ack" });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false });
@@ -400,14 +501,263 @@ app.get("/mercadopago/webhook", async (req, res) => {
 });
 
 app.get("/billing/checkout-config", (_req, res) => {
+  const amounts = computeBrickAmounts(config.mpUsdArsRate);
   res.json({
     ok: true,
     selfUrl: config.mpCheckoutSelfUrl || "",
     setupUrl: config.mpCheckoutSetupUrl || "",
     mpConfigured: Boolean(config.mpAccessToken),
+    brickEnabled: Boolean(config.mpAccessToken && config.mpPublicKey),
+    publicKey: config.mpPublicKey || "",
+    amounts,
     webhookUrl: config.mpWebhookPublicUrl,
     backUrlSelf: `${config.mpBackUrlBase}?paid=1&plan=self`,
     backUrlSetup: `${config.mpBackUrlBase}?paid=1&plan=setup`,
+  });
+});
+
+/** Card Payment Brick → cobro / suscripción (sesión requerida). */
+app.post("/billing/process-card", async (req, res) => {
+  const sess = sessionFromToken(bearerToken(req));
+  if (!sess) {
+    res.status(401).json({ ok: false, error: "Iniciá sesión para pagar" });
+    return;
+  }
+  if (!config.mpAccessToken) {
+    res.status(503).json({ ok: false, error: "Mercado Pago no configurado" });
+    return;
+  }
+  const plan = req.body?.plan === "setup" ? "setup" : req.body?.plan === "self" ? "self" : null;
+  if (!plan) {
+    res.status(400).json({ ok: false, error: "Plan inválido" });
+    return;
+  }
+  const amounts = computeBrickAmounts(config.mpUsdArsRate);
+  try {
+    const result = await processBrickCheckout({
+      accessToken: config.mpAccessToken,
+      plan,
+      amounts,
+      userId: sess.user.id,
+      userEmail: sess.user.email,
+      backUrl: `${config.mpBackUrlBase}?paid=1&plan=${plan}`,
+      card: {
+        token: String(req.body?.token ?? ""),
+        payment_method_id: String(req.body?.payment_method_id ?? ""),
+        issuer_id: req.body?.issuer_id,
+        installments: req.body?.installments,
+        payer: req.body?.payer,
+      },
+    });
+    if (!result.ok) {
+      res.status(400).json({ ok: false, error: result.detail || "No se pudo procesar el pago" });
+      return;
+    }
+    const renewalRequired =
+      Boolean(result.needsCardForMonthly) || (result.plan === "setup" && !result.mpPreapprovalId);
+    const periodEndsAt = renewalRequired
+      ? computePeriodEndsAt({
+          periodDays: config.billingPeriodDays,
+          testGraceMinutes: config.billingTestGraceMinutes,
+        })
+      : undefined;
+    patchEntitlement(sess.user.id, {
+      status: "active",
+      plan: result.plan ?? plan,
+      mpPaymentId: result.mpPaymentId,
+      mpPreapprovalId: result.mpPreapprovalId,
+      mpCustomerId: result.mpCustomerId,
+      cardLastFour: result.cardLastFour,
+      ...(renewalRequired
+        ? { periodEndsAt, renewalRequired: true }
+        : { renewalRequired: false, clearPeriodEndsAt: true }),
+    });
+    console.log(
+      "[billing] brick → entitlement",
+      sess.user.email,
+      result.plan,
+      result.mpPaymentId ?? result.mpPreapprovalId,
+      renewalRequired ? `renewal_grace_until=${periodEndsAt}` : "ok",
+    );
+    const entitlement = toEntitlementView(
+      listUsers().find((u) => u.id === sess.user.id)!.entitlement,
+    );
+    res.json({
+      ok: true,
+      plan: result.plan,
+      setupMeetPending: result.setupMeetPending,
+      amount: result.amount,
+      detail: result.detail,
+      renewalRequired,
+      periodEndsAt,
+      needsCardForMonthly: result.needsCardForMonthly,
+      entitlement,
+    });
+  } catch (err) {
+    console.error("[billing] process-card", err);
+    res.status(500).json({ ok: false, error: "Error al procesar el cobro" });
+  }
+});
+
+/** Engancha cobro mensual (tarjeta) cuando Setup no dejó suscripción. */
+app.post("/billing/attach-card", async (req, res) => {
+  const sess = sessionFromToken(bearerToken(req));
+  if (!sess) {
+    res.status(401).json({ ok: false, error: "Iniciá sesión" });
+    return;
+  }
+  if (!config.mpAccessToken) {
+    res.status(503).json({ ok: false, error: "Mercado Pago no configurado" });
+    return;
+  }
+  const amounts = computeBrickAmounts(config.mpUsdArsRate);
+  try {
+    const result = await attachMonthlyWithCard({
+      accessToken: config.mpAccessToken,
+      amounts,
+      userId: sess.user.id,
+      userEmail: sess.user.email,
+      backUrl: `${config.mpBackUrlBase}?paid=1&plan=self`,
+      startNextMonth: true,
+      card: {
+        token: String(req.body?.token ?? ""),
+        payment_method_id: String(req.body?.payment_method_id ?? ""),
+        issuer_id: req.body?.issuer_id,
+        installments: req.body?.installments,
+        payer: req.body?.payer,
+      },
+    });
+    if (!result.ok) {
+      res.status(400).json({ ok: false, error: result.detail || "No se pudo guardar la tarjeta" });
+      return;
+    }
+    patchEntitlement(sess.user.id, {
+      status: "active",
+      mpPreapprovalId: result.mpPreapprovalId,
+      mpCustomerId: result.mpCustomerId,
+      cardLastFour: result.cardLastFour,
+      renewalRequired: false,
+      clearPeriodEndsAt: true,
+    });
+    res.json({
+      ok: true,
+      entitlement: toEntitlementView(
+        listUsers().find((u) => u.id === sess.user.id)!.entitlement,
+      ),
+      mpPreapprovalId: result.mpPreapprovalId,
+      cardLastFour: result.cardLastFour,
+    });
+  } catch (err) {
+    console.error("[billing] attach-card", err);
+    res.status(500).json({ ok: false, error: "Error al enganchar el cobro mensual" });
+  }
+});
+
+/** Estado de membresía / suscripción MP. */
+app.get("/billing/subscription", async (req, res) => {
+  const sess = sessionFromToken(bearerToken(req));
+  if (!sess) {
+    res.status(401).json({ ok: false, error: "Iniciá sesión" });
+    return;
+  }
+  const ent = listUsers().find((u) => u.id === sess.user.id)?.entitlement;
+  if (!ent) {
+    res.json({ ok: true, subscription: null });
+    return;
+  }
+  let mpStatus: string | undefined;
+  let nextPaymentDate: string | undefined;
+  let amount: number | undefined;
+  if (ent.mpPreapprovalId && config.mpAccessToken) {
+    const pre = await fetchPreapproval({
+      accessToken: config.mpAccessToken,
+      preapprovalId: ent.mpPreapprovalId,
+    });
+    if (pre.ok) {
+      mpStatus = pre.status;
+      nextPaymentDate = pre.nextPaymentDate;
+      amount = pre.amount;
+    }
+  }
+  res.json({
+    ok: true,
+    subscription: {
+      status: ent.status,
+      plan: ent.plan,
+      renewalRequired: Boolean(ent.renewalRequired),
+      periodEndsAt: ent.periodEndsAt,
+      daysLeft: ent.daysLeft,
+      graceLabel: ent.graceLabel,
+      mpPreapprovalId: ent.mpPreapprovalId,
+      mpCustomerId: ent.mpCustomerId,
+      cardLastFour: ent.cardLastFour,
+      mpStatus,
+      nextPaymentDate,
+      amountArs: amount,
+      canCancel:
+        Boolean(ent.mpPreapprovalId) &&
+        mpStatus !== "canceled" &&
+        mpStatus !== "cancelled" &&
+        mpStatus !== "paused",
+    },
+  });
+});
+
+/** Cancela la suscripción en Mercado Pago desde Lía. */
+app.post("/billing/cancel-subscription", async (req, res) => {
+  const sess = sessionFromToken(bearerToken(req));
+  if (!sess) {
+    res.status(401).json({ ok: false, error: "Iniciá sesión" });
+    return;
+  }
+  if (!config.mpAccessToken) {
+    res.status(503).json({ ok: false, error: "Mercado Pago no configurado" });
+    return;
+  }
+  const prev = listUsers().find((u) => u.id === sess.user.id)?.entitlement;
+  const preId = prev?.mpPreapprovalId;
+  if (!preId) {
+    res.status(400).json({ ok: false, error: "No hay suscripción activa para cancelar" });
+    return;
+  }
+  const canceled = await cancelPreapproval({
+    accessToken: config.mpAccessToken,
+    preapprovalId: preId,
+  });
+  const pre = await fetchPreapproval({
+    accessToken: config.mpAccessToken,
+    preapprovalId: preId,
+  });
+  const mpCanceled =
+    canceled.ok ||
+    pre.status === "canceled" ||
+    pre.status === "cancelled";
+  if (!mpCanceled) {
+    res.status(400).json({ ok: false, error: canceled.detail || "No se pudo cancelar" });
+    return;
+  }
+  const periodEndsAt = paidPeriodEndsAt({
+    existingPeriodEndsAt: prev?.periodEndsAt,
+    nextPaymentDate: pre.nextPaymentDate,
+    periodDays: config.billingPeriodDays,
+  });
+  patchEntitlement(sess.user.id, {
+    status: "active",
+    plan: prev?.plan,
+    mpPaymentId: prev?.mpPaymentId,
+    mpPreapprovalId: preId,
+    mpCustomerId: prev?.mpCustomerId,
+    cardLastFour: prev?.cardLastFour,
+    periodEndsAt,
+    renewalRequired: true,
+  });
+  console.log("[billing] cancel subscription", sess.user.email, preId, periodEndsAt);
+  res.json({
+    ok: true,
+    entitlement: toEntitlementView(
+      listUsers().find((u) => u.id === sess.user.id)!.entitlement,
+    ),
+    message: "Suscripción cancelada. Seguis con acceso hasta fin del período pagado.",
   });
 });
 
@@ -432,13 +782,13 @@ app.post("/billing/confirm", async (req, res) => {
       return;
     }
     const act = result.activation;
-    upsertEntitlement({
-      userId: sess.user.id,
+    patchEntitlement(sess.user.id, {
       status: "active",
       plan: act.plan,
       mpPaymentId: act.mpPaymentId,
       mpPreapprovalId: act.mpPreapprovalId,
-      updatedAt: new Date().toISOString(),
+      renewalRequired: false,
+      clearPeriodEndsAt: true,
     });
     console.log("[billing] confirm → entitlement", sess.user.email, act.plan, act.mpPaymentId ?? act.mpPreapprovalId);
     res.json({
@@ -447,7 +797,7 @@ app.post("/billing/confirm", async (req, res) => {
       setupMeetPending: act.setupMeetPending,
       amount: act.amount,
       detail: result.detail,
-      entitlement: { status: "active", plan: act.plan },
+      entitlement: toEntitlementView(listUsers().find((u) => u.id === sess.user.id)!.entitlement),
     });
   } catch (err) {
     console.error("[mp] confirm error", err);
@@ -480,20 +830,20 @@ app.post("/billing/sync-after-checkout", async (req, res) => {
       return;
     }
     const act = result.activation;
-    upsertEntitlement({
-      userId: sess.user.id,
+    patchEntitlement(sess.user.id, {
       status: "active",
       plan: act.plan,
       mpPaymentId: act.mpPaymentId,
       mpPreapprovalId: act.mpPreapprovalId,
-      updatedAt: new Date().toISOString(),
+      renewalRequired: false,
+      clearPeriodEndsAt: true,
     });
     res.json({
       ok: true,
       plan: act.plan,
       setupMeetPending: act.setupMeetPending,
       detail: result.detail,
-      entitlement: { status: "active", plan: act.plan },
+      entitlement: toEntitlementView(listUsers().find((u) => u.id === sess.user.id)!.entitlement),
     });
   } catch (err) {
     console.error("[mp] sync-after-checkout", err);

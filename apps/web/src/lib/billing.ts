@@ -88,24 +88,96 @@ export async function loadCheckoutConfigFromBot(): Promise<{
   selfUrl: string;
   setupUrl: string;
   mpConfigured: boolean;
+  brickEnabled: boolean;
+  publicKey: string;
+  amounts: BrickAmounts | null;
 }> {
   try {
     const { botUrl } = await import("@/lib/botBase");
     const res = await fetch(botUrl("/billing/checkout-config"));
-    if (!res.ok) return { selfUrl: "", setupUrl: "", mpConfigured: false };
+    if (!res.ok) {
+      return {
+        selfUrl: "",
+        setupUrl: "",
+        mpConfigured: false,
+        brickEnabled: false,
+        publicKey: "",
+        amounts: null,
+      };
+    }
     const data = (await res.json()) as {
       selfUrl?: string;
       setupUrl?: string;
       mpConfigured?: boolean;
+      brickEnabled?: boolean;
+      publicKey?: string;
+      amounts?: BrickAmounts;
     };
     setRuntimeCheckoutUrls({ selfUrl: data.selfUrl, setupUrl: data.setupUrl });
     return {
       selfUrl: data.selfUrl ?? "",
       setupUrl: data.setupUrl ?? "",
       mpConfigured: Boolean(data.mpConfigured),
+      brickEnabled: Boolean(data.brickEnabled && data.publicKey),
+      publicKey: data.publicKey ?? "",
+      amounts: data.amounts ?? null,
     };
   } catch {
-    return { selfUrl: "", setupUrl: "", mpConfigured: false };
+    return {
+      selfUrl: "",
+      setupUrl: "",
+      mpConfigured: false,
+      brickEnabled: false,
+      publicKey: "",
+      amounts: null,
+    };
+  }
+}
+
+export type BrickAmounts = {
+  usdSelf: number;
+  usdSetup: number;
+  fxArs: number;
+  arsSelf: number;
+  arsSetup: number;
+};
+
+/** Procesa el formData del Card Payment Brick en el bot. */
+export async function processBrickCardPayment(
+  plan: SubscriptionPlan,
+  formData: object,
+): Promise<{ ok: boolean; plan?: SubscriptionPlan; setupMeetPending?: boolean; error?: string }> {
+  try {
+    const { botUrl } = await import("@/lib/botBase");
+    const { getSessionToken } = await import("@/lib/authApi");
+    const token = getSessionToken();
+    if (!token) {
+      return { ok: false, error: "Iniciá sesión para pagar" };
+    }
+    const res = await fetch(botUrl("/billing/process-card"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ plan, ...formData }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      plan?: SubscriptionPlan;
+      setupMeetPending?: boolean;
+      error?: string;
+    };
+    if (!res.ok || !data.ok) {
+      return { ok: false, error: data.error || "No se pudo procesar el pago" };
+    }
+    return {
+      ok: true,
+      plan: data.plan ?? plan,
+      setupMeetPending: data.setupMeetPending,
+    };
+  } catch {
+    return { ok: false, error: "No pude contactar al servidor de Lía" };
   }
 }
 

@@ -3,6 +3,7 @@ import { useLia } from "@/context/LiaContext";
 import { CsvImporter } from "@/components/CsvImporter";
 import { MetaWizard } from "@/components/MetaWizard";
 import { Badge, Button, Card, Field, inputClass } from "@/components/ui";
+import { MembershipPanel } from "@/components/MembershipPanel";
 import { ALL_RAMOS, POLICY_LABEL, type LiaState } from "@/lib/types";
 import { useState } from "react";
 
@@ -23,9 +24,24 @@ function downloadBackup(state: LiaState) {
 }
 
 export function Settings() {
-  const { state, save, updateBot, restoreState } = useLia();
+  const { state, save, updateBot, restoreState, isAdmin, refreshEntitlement } = useLia();
   const p = state.producer;
   const [backupMsg, setBackupMsg] = useState("");
+  const [graceMsg, setGraceMsg] = useState("");
+
+  async function onSimulateGrace() {
+    setGraceMsg("");
+    const { simulateRenewalGrace } = await import("@/lib/renewalGrace");
+    const r = await simulateRenewalGrace(3);
+    if (!r.ok) {
+      setGraceMsg(r.error || "Falló la simulación");
+      return;
+    }
+    await refreshEntitlement();
+    setGraceMsg(
+      `Gracia activa: ${r.entitlement?.graceLabel ?? "3 minutos"}. Vas a ver el aviso rojo; al vencer te manda a Activar.`,
+    );
+  }
 
   async function onRestoreFile(file: File | undefined) {
     if (!file) return;
@@ -60,6 +76,7 @@ export function Settings() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
+      {p.plan === "estudio" ? <MembershipPanel /> : null}
       <Card className="space-y-4 p-6">
         <h2 className="font-serif text-2xl">El estudio</h2>
         <Field label="Nombre del productor">
@@ -127,6 +144,14 @@ export function Settings() {
             <Link to="/activar" className="mt-1 inline-block text-sm text-gold underline">
               Activar plan
             </Link>
+          ) : null}
+          {isAdmin ? (
+            <div className="mt-3 space-y-2">
+              <Button variant="ghost" className="text-xs" onClick={() => void onSimulateGrace()}>
+                Probar aviso de renovación (3 min)
+              </Button>
+              {graceMsg ? <p className="text-xs text-ink-soft">{graceMsg}</p> : null}
+            </div>
           ) : null}
         </Field>
         <Field label="WhatsApp del estudio">

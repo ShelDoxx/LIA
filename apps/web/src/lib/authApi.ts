@@ -6,6 +6,10 @@ export type LiaEntitlement = {
   userId: string;
   status: "none" | "trial" | "active" | "expired";
   plan?: "self" | "setup";
+  periodEndsAt?: string;
+  renewalRequired?: boolean;
+  daysLeft?: number | null;
+  graceLabel?: string | null;
   updatedAt?: string;
 };
 

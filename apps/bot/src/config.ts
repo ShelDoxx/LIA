@@ -16,7 +16,11 @@ export const config = {
   graphVersion: "v21.0",
   /** Access Token de Mercado Pago (suscripciones / webhooks) */
   mpAccessToken: process.env.MP_ACCESS_TOKEN ?? "",
-  /** Links públicos de checkout (no son secretos) */
+  /** Public Key (Brick en el front — no es secreto de API) */
+  mpPublicKey: process.env.MP_PUBLIC_KEY ?? "",
+  /** Tipo de cambio ARS por 1 USD (cobro fijo: 49×TC / 149×TC) */
+  mpUsdArsRate: Number(process.env.MP_USD_ARS_RATE ?? 1550),
+  /** Links públicos de checkout (legacy; Brick es el camino principal) */
   mpCheckoutSelfUrl: process.env.MP_CHECKOUT_SELF_URL ?? "",
   mpCheckoutSetupUrl: process.env.MP_CHECKOUT_SETUP_URL ?? "",
   /** Clave secreta del webhook (MP → Notificaciones → revelar) */
@@ -40,6 +44,12 @@ export const config = {
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean),
   isProduction: process.env.NODE_ENV === "production",
+  /**
+   * Días de acceso tras Setup si no quedó suscripción mensual (default 30 = 1 mes).
+   * Si BILLING_TEST_GRACE_MINUTES > 0, se usa ese valor en minutos (solo para prueba).
+   */
+  billingPeriodDays: Number(process.env.BILLING_PERIOD_DAYS ?? 30),
+  billingTestGraceMinutes: Number(process.env.BILLING_TEST_GRACE_MINUTES ?? 0),
 };
 
 export function isConfigured() {

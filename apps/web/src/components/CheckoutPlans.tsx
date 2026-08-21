@@ -1,24 +1,32 @@
 import { useEffect, useState } from "react";
 import { Button, Card } from "@/components/ui";
+import { MpCardBrick } from "@/components/MpCardBrick";
 import {
   checkoutSelfUrl,
   checkoutSetupUrl,
   loadCheckoutConfigFromBot,
   setupMeetWhatsAppUrl,
   startCheckout,
+  type BrickAmounts,
   type SubscriptionPlan,
 } from "@/lib/billing";
 
 type Props = {
   producerName?: string;
+  payerEmail?: string;
   onActivate: (plan: SubscriptionPlan) => void;
+  onPaid: (result: { plan: SubscriptionPlan; setupMeetPending?: boolean }) => void;
   compact?: boolean;
 };
 
-export function CheckoutPlans({ producerName, onActivate, compact }: Props) {
+export function CheckoutPlans({ producerName, payerEmail, onActivate, onPaid, compact }: Props) {
   const [ready, setReady] = useState(false);
   const [selfUrl, setSelfUrl] = useState(checkoutSelfUrl());
   const [setupUrl, setSetupUrl] = useState(checkoutSetupUrl());
+  const [brickEnabled, setBrickEnabled] = useState(false);
+  const [publicKey, setPublicKey] = useState("");
+  const [amounts, setAmounts] = useState<BrickAmounts | null>(null);
+  const [selected, setSelected] = useState<SubscriptionPlan | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -26,6 +34,9 @@ export function CheckoutPlans({ producerName, onActivate, compact }: Props) {
       if (cancelled) return;
       setSelfUrl(cfg.selfUrl || checkoutSelfUrl());
       setSetupUrl(cfg.setupUrl || checkoutSetupUrl());
+      setBrickEnabled(cfg.brickEnabled);
+      setPublicKey(cfg.publicKey);
+      setAmounts(cfg.amounts);
       setReady(true);
     });
     return () => {
@@ -35,9 +46,13 @@ export function CheckoutPlans({ producerName, onActivate, compact }: Props) {
 
   const hasSelf = Boolean(selfUrl);
   const hasSetup = Boolean(setupUrl);
-  const hasAny = hasSelf || hasSetup;
+  const hasAny = brickEnabled || hasSelf || hasSetup;
 
   function pick(plan: SubscriptionPlan) {
+    if (brickEnabled && amounts && publicKey) {
+      setSelected(plan);
+      return;
+    }
     const mode = startCheckout(plan, onActivate);
     if (mode === "unavailable") {
       window.alert(
@@ -48,6 +63,21 @@ export function CheckoutPlans({ producerName, onActivate, compact }: Props) {
     if (mode === "demo" && plan === "setup") {
       window.open(setupMeetWhatsAppUrl(producerName), "_blank", "noopener,noreferrer");
     }
+  }
+
+  if (selected && brickEnabled && amounts && publicKey) {
+    return (
+      <Card className="border-gold/40 bg-gold/5 p-5">
+        <MpCardBrick
+          plan={selected}
+          publicKey={publicKey}
+          amounts={amounts}
+          payerEmail={payerEmail}
+          onSuccess={onPaid}
+          onCancel={() => setSelected(null)}
+        />
+      </Card>
+    );
   }
 
   return (
@@ -69,7 +99,7 @@ export function CheckoutPlans({ producerName, onActivate, compact }: Props) {
           disabled={!ready && !hasAny}
           onClick={() => pick("self")}
         >
-          Elegir Self-service
+          {brickEnabled ? "Pagar Self-service" : "Elegir Self-service"}
         </Button>
       </Card>
 
@@ -91,13 +121,13 @@ export function CheckoutPlans({ producerName, onActivate, compact }: Props) {
           disabled={!ready && !hasAny}
           onClick={() => pick("setup")}
         >
-          Elegir Setup completo
+          {brickEnabled ? "Pagar Setup completo" : "Elegir Setup completo"}
         </Button>
       </Card>
 
       {!hasAny && ready && (
         <p className="text-xs text-ink-soft md:col-span-2">
-          Links de cobro no disponibles. Contactá soporte o pedí activación manual al admin.
+          Cobro no disponible. Contactá soporte o pedí activación manual al admin.
         </p>
       )}
     </div>

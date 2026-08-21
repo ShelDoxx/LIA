@@ -90,10 +90,13 @@ function upsert(next: BillingActivation) {
 
 function detectPlan(amount?: number, ref?: string): BillingPlan {
   const r = (ref ?? "").toLowerCase();
-  if (r.includes("setup") || r.includes("149")) return "setup";
-  if (r.includes("self") || r.includes("49")) return "self";
+  // No matchear "49"/"149" sueltos: external_reference suele ser userId (UUID).
+  if (/\bsetup\b/.test(r) || r.includes("usd 149")) return "setup";
+  if (/\bself\b/.test(r) || r.includes("usd 49")) return "self";
   if (typeof amount === "number") {
-    if (amount >= 100) return "setup";
+    // ARS fijo (FX~1550): setup 230950 · self 75950. Legacy USD: 149 / 49.
+    if (amount >= 150_000) return "setup";
+    if (amount >= 100 && amount < 1_000) return "setup";
     return "self";
   }
   return "self";
@@ -149,6 +152,59 @@ async function findApprovedChargeForPreapproval(
     }
   }
   return null;
+}
+
+export { findApprovedChargeForPreapproval };
+
+/** Espera cobro approved (MP a veces acredita async tras authorized). */
+export async function waitForApprovedCharge(
+  preId: string,
+  accessToken: string,
+  opts?: { attempts?: number; delayMs?: number },
+): Promise<{ paymentId?: string; amount?: number } | null> {
+  const attempts = opts?.attempts ?? 6;
+  const delayMs = opts?.delayMs ?? 800;
+  for (let i = 0; i < attempts; i++) {
+    const hit = await findApprovedChargeForPreapproval(preId, accessToken);
+    if (hit) return hit;
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return null;
+}
+
+function ownershipOk(
+  externalReference: string | undefined,
+  userId: string | undefined,
+): { ok: true } | { ok: false; detail: string } {
+  if (!userId) return { ok: true };
+  const ref = (externalReference ?? "").trim();
+  if (!ref) {
+    return {
+      ok: false,
+      detail:
+        "Este pago no está vinculado a una cuenta Lía. Pagá desde /activar con sesión iniciada.",
+    };
+  }
+  if (ref !== userId) {
+    return {
+      ok: false,
+      detail: "Este pago pertenece a otra cuenta. Iniciá sesión con el email que usaste al pagar.",
+    };
+  }
+  return { ok: true };
+}
+
+async function externalRefFromPreapproval(
+  preapprovalId: string | undefined,
+  accessToken: string,
+): Promise<string | undefined> {
+  if (!preapprovalId) return undefined;
+  const res = await fetch(`https://api.mercadopago.com/preapproval/${preapprovalId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) return undefined;
+  const data = (await res.json()) as { external_reference?: string };
+  return data.external_reference ? String(data.external_reference) : undefined;
 }
 
 /**
@@ -248,6 +304,7 @@ export async function handleMercadoPagoNotification(opts: {
       currency_id?: string;
       preapproval_id?: string;
       reason?: string;
+      external_reference?: string;
       payment?: { id?: number; status?: string };
     };
     const payStatus = data.payment?.status;
@@ -256,10 +313,14 @@ export async function handleMercadoPagoNotification(opts: {
     let status: BillingActivation["status"] = "pending";
     if (isPaymentApproved(payStatus)) status = "active";
     else if (isDeadPaymentStatus(payStatus) || isDeadPaymentStatus(data.status)) status = "cancelled";
+    const externalReference =
+      data.external_reference ||
+      (await externalRefFromPreapproval(data.preapproval_id, accessToken));
     const activation: BillingActivation = {
       id: crypto.randomUUID(),
       plan,
       status,
+      externalReference,
       mpPaymentId: String(data.payment?.id ?? data.id ?? id),
       mpPreapprovalId: data.preapproval_id,
       amount,
@@ -270,7 +331,15 @@ export async function handleMercadoPagoNotification(opts: {
       rawType: topic,
     };
     upsert(activation);
-    console.log("[mp] authorized_payment", status, plan, amount, payStatus, id);
+    console.log(
+      "[mp] authorized_payment",
+      status,
+      plan,
+      amount,
+      payStatus,
+      externalReference ?? "no-ref",
+      id,
+    );
     return { ok: true, activation };
   }
 
@@ -399,6 +468,8 @@ export async function confirmByOperationId(opts: {
           }). Sin cobro aprobado no se activa.`,
         };
       }
+      const owned = ownershipOk(data.external_reference, opts.userId);
+      if (!owned.ok) return owned;
       const amount = data.transaction_amount;
       const plan = resolvePlan(
         amount,
@@ -448,6 +519,12 @@ export async function confirmByOperationId(opts: {
           }). Sin cobro approved no se activa.`,
         };
       }
+      const externalReference = await externalRefFromPreapproval(
+        data.preapproval_id,
+        opts.accessToken,
+      );
+      const owned = ownershipOk(externalReference, opts.userId);
+      if (!owned.ok) return owned;
       const amount = data.transaction_amount;
       const plan = resolvePlan(amount, undefined, opts.claimedPlan);
       const activation: BillingActivation = {
@@ -455,6 +532,7 @@ export async function confirmByOperationId(opts: {
         plan,
         status: "active",
         userId: opts.userId,
+        externalReference,
         mpPaymentId: String(data.payment?.id ?? data.id ?? id),
         mpPreapprovalId: data.preapproval_id,
         amount,
@@ -491,6 +569,8 @@ export async function confirmByOperationId(opts: {
             detail: `La suscripción está en estado "${data.status ?? "desconocido"}". Cancelada/pausada no activa.`,
           };
         }
+        const owned = ownershipOk(data.external_reference, opts.userId);
+        if (!owned.ok) return owned;
         // Obligatorio: cobro approved (no alcanza authorized sin plata)
         const charge = await findApprovedChargeForPreapproval(String(data.id ?? preId), opts.accessToken);
         if (!charge) {

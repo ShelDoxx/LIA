@@ -191,6 +191,13 @@ type LiaContextValue = {
   signedIn: boolean;
   isAdmin: boolean;
   entitlementStatus: "none" | "trial" | "active" | "expired" | null;
+  entitlement: {
+    renewalRequired?: boolean;
+    periodEndsAt?: string;
+    daysLeft?: number | null;
+    graceLabel?: string | null;
+    plan?: "self" | "setup";
+  } | null;
   refreshEntitlement: () => Promise<void>;
   signIn: (name?: string, email?: string, plan?: "demo" | "estudio") => Promise<void>;
   requestEmailOtp: (email: string, name?: string) => Promise<{ ok: boolean; error?: string; devCode?: string }>;
@@ -274,6 +281,13 @@ export function LiaProvider({ children }: { children: ReactNode }) {
   const [entitlementStatus, setEntitlementStatus] = useState<
     "none" | "trial" | "active" | "expired" | null
   >(null);
+  const [entitlementMeta, setEntitlementMeta] = useState<{
+    renewalRequired?: boolean;
+    periodEndsAt?: string;
+    daysLeft?: number | null;
+    graceLabel?: string | null;
+    plan?: "self" | "setup";
+  } | null>(null);
   const [ready, setReady] = useState(false);
   const [isProcessingMedia, setIsProcessingMedia] = useState(false);
   const stateRef = useRef<LiaState | null>(null);
@@ -295,6 +309,17 @@ export function LiaProvider({ children }: { children: ReactNode }) {
           if (me.ok) {
             setIsAdmin(me.isAdmin);
             setEntitlementStatus(me.entitlement?.status ?? "none");
+            setEntitlementMeta(
+              me.entitlement
+                ? {
+                    renewalRequired: me.entitlement.renewalRequired,
+                    periodEndsAt: me.entitlement.periodEndsAt,
+                    daysLeft: me.entitlement.daysLeft,
+                    graceLabel: me.entitlement.graceLabel,
+                    plan: me.entitlement.plan,
+                  }
+                : null,
+            );
             finalState = {
               ...finalState,
               producer: {
@@ -346,6 +371,7 @@ export function LiaProvider({ children }: { children: ReactNode }) {
             await logoutSession();
             setIsAdmin(false);
             setEntitlementStatus(null);
+            setEntitlementMeta(null);
           }
         }
 
@@ -507,15 +533,28 @@ export function LiaProvider({ children }: { children: ReactNode }) {
       signedIn,
       isAdmin,
       entitlementStatus,
+      entitlement: entitlementMeta,
       refreshEntitlement: async () => {
         const me = await fetchAuthMe();
         if (!me.ok) {
           setEntitlementStatus(null);
+          setEntitlementMeta(null);
           setIsAdmin(false);
           return;
         }
         setIsAdmin(me.isAdmin);
         setEntitlementStatus(me.entitlement?.status ?? "none");
+        setEntitlementMeta(
+          me.entitlement
+            ? {
+                renewalRequired: me.entitlement.renewalRequired,
+                periodEndsAt: me.entitlement.periodEndsAt,
+                daysLeft: me.entitlement.daysLeft,
+                graceLabel: me.entitlement.graceLabel,
+                plan: me.entitlement.plan,
+              }
+            : null,
+        );
       },
       isProcessingMedia,
       signIn: async (name, email, plan) => {
@@ -542,6 +581,7 @@ export function LiaProvider({ children }: { children: ReactNode }) {
         await persist(next);
         await set(AUTH_KEY, "1");
         setEntitlementStatus(null);
+        setEntitlementMeta(null);
         setIsAdmin(false);
         setSignedIn(true);
       },
@@ -586,6 +626,17 @@ export function LiaProvider({ children }: { children: ReactNode }) {
         await persist(next);
         await set(AUTH_KEY, "1");
         setEntitlementStatus(r.entitlement?.status ?? "none");
+        setEntitlementMeta(
+          r.entitlement
+            ? {
+                renewalRequired: r.entitlement.renewalRequired,
+                periodEndsAt: r.entitlement.periodEndsAt,
+                daysLeft: r.entitlement.daysLeft,
+                graceLabel: r.entitlement.graceLabel,
+                plan: r.entitlement.plan,
+              }
+            : null,
+        );
         const admin = Boolean(r.isAdmin);
         setIsAdmin(admin);
         setSignedIn(true);
@@ -614,6 +665,7 @@ export function LiaProvider({ children }: { children: ReactNode }) {
         await del(AUTH_KEY);
         setIsAdmin(false);
         setEntitlementStatus(null);
+        setEntitlementMeta(null);
         setSignedIn(false);
       },
       save: persist,
@@ -1106,7 +1158,7 @@ export function LiaProvider({ children }: { children: ReactNode }) {
         });
       },
     };
-  }, [state, signedIn, isProcessingMedia, isAdmin, entitlementStatus]);
+  }, [state, signedIn, isProcessingMedia, isAdmin, entitlementStatus, entitlementMeta]);
 
   if (!ready || !state || !value) {
     return (

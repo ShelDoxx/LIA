@@ -1,0 +1,87 @@
+import { useEffect, useState } from "react";
+import { initMercadoPago, CardPayment } from "@mercadopago/sdk-react";
+import type { SubscriptionPlan } from "@/lib/billing";
+import { processBrickCardPayment, type BrickAmounts } from "@/lib/billing";
+import { Button } from "@/components/ui";
+
+type Props = {
+  plan: SubscriptionPlan;
+  publicKey: string;
+  amounts: BrickAmounts;
+  payerEmail?: string;
+  onSuccess: (result: { plan: SubscriptionPlan; setupMeetPending?: boolean }) => void;
+  onCancel: () => void;
+};
+
+export function MpCardBrick({ plan, publicKey, amounts, payerEmail, onSuccess, onCancel }: Props) {
+  const [ready, setReady] = useState(false);
+  const [err, setErr] = useState("");
+  const amount = plan === "setup" ? amounts.arsSetup : amounts.arsSelf;
+
+  useEffect(() => {
+    if (!publicKey) return;
+    initMercadoPago(publicKey, { locale: "es-AR" });
+    setReady(true);
+  }, [publicKey]);
+
+  if (!ready || !publicKey) {
+    return <p className="text-sm text-ink-soft">Cargando formulario de pago…</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-line bg-cream/40 p-4">
+        <p className="text-xs font-medium uppercase tracking-wide text-gold">
+          {plan === "setup" ? "Setup completo" : "Self-service"}
+        </p>
+        <p className="mt-1 font-serif text-xl text-forest">
+          {plan === "setup"
+            ? `USD ${amounts.usdSetup} · 1er mes`
+            : `USD ${amounts.usdSelf} / mes`}
+        </p>
+        <p className="mt-1 text-sm text-ink-soft">
+          Se cobra en pesos:{" "}
+          <strong>
+            {amount.toLocaleString("es-AR")} ARS
+          </strong>
+          {plan === "setup"
+            ? ` (después USD ${amounts.usdSelf}/mes = ${amounts.arsSelf.toLocaleString("es-AR")} ARS)`
+            : " · suscripción mensual"}
+          . TC {amounts.fxArs.toLocaleString("es-AR")}.
+        </p>
+      </div>
+
+      {err ? <p className="text-sm text-danger">{err}</p> : null}
+
+      <CardPayment
+        initialization={{
+          amount,
+          payer: payerEmail ? { email: payerEmail } : undefined,
+        }}
+        customization={{
+          visual: { style: { theme: "default" } },
+        }}
+        onSubmit={async (formData) => {
+          setErr("");
+          const result = await processBrickCardPayment(plan, formData);
+          if (!result.ok) {
+            setErr(result.error || "No se pudo procesar el pago");
+            throw new Error(result.error || "payment_failed");
+          }
+          onSuccess({
+            plan: result.plan ?? plan,
+            setupMeetPending: result.setupMeetPending,
+          });
+        }}
+        onError={(error) => {
+          console.error("[mp brick]", error);
+          setErr("Hubo un problema con el formulario de tarjeta.");
+        }}
+      />
+
+      <Button variant="ghost" className="w-full" onClick={onCancel}>
+        Volver a los planes
+      </Button>
+    </div>
+  );
+}

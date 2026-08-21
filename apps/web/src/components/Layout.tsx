@@ -26,7 +26,7 @@ import { buildAgenda } from "@/lib/agenda";
 import { fullName } from "@/lib/format";
 import { LiaMark } from "@/components/LiaMark";
 import { Badge } from "@/components/ui";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 
 type NavItem = { to: string; label: string; icon: typeof LayoutDashboard };
 
@@ -50,13 +50,26 @@ const moreLinks: NavItem[] = [
 ];
 
 export function Layout() {
-  const { state, signOut, isAdmin } = useLia();
+  const { state, signOut, isAdmin, entitlement, entitlementStatus, refreshEntitlement } = useLia();
   const loc = useLocation();
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
   const [moreNav, setMoreNav] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
+
+  useEffect(() => {
+    if (!entitlement?.renewalRequired || entitlementStatus !== "active") return;
+    const tick = () => {
+      void refreshEntitlement();
+    };
+    const id = window.setInterval(tick, 20_000);
+    window.addEventListener("focus", tick);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("focus", tick);
+    };
+  }, [entitlement?.renewalRequired, entitlementStatus, refreshEntitlement]);
   const navMore = useMemo(
     () =>
       isAdmin
@@ -308,6 +321,17 @@ export function Layout() {
             Vista productor (admin).{" "}
             <Link to="/admin" className="font-medium text-gold underline">
               Ir a consola ops →
+            </Link>
+          </div>
+        ) : null}
+        {entitlement?.renewalRequired &&
+        entitlementStatus === "active" &&
+        entitlement.graceLabel ? (
+          <div className="border-b border-danger/40 bg-red-50 px-4 py-2 text-center text-sm text-danger md:px-8">
+            Renová tu membresía: quedan <strong>{entitlement.graceLabel}</strong> de acceso. Si no
+            configurás el cobro mensual, el escritorio se bloquea.
+            <Link to="/activar" className="ml-2 font-medium underline">
+              Renovar ahora
             </Link>
           </div>
         ) : null}

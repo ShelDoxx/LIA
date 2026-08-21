@@ -18,7 +18,19 @@ export type Entitlement = {
   plan?: "self" | "setup";
   mpPaymentId?: string;
   mpPreapprovalId?: string;
+  mpCustomerId?: string;
+  cardLastFour?: string;
+  /** Fin del período pagado (ISO). Al vencer → expired. */
+  periodEndsAt?: string;
+  /** Debe renovar / cargar tarjeta antes de periodEndsAt */
+  renewalRequired?: boolean;
   updatedAt: string;
+};
+
+/** Vista pública: incluye días/tiempo restante de gracia. */
+export type EntitlementView = Entitlement & {
+  daysLeft: number | null;
+  graceLabel: string | null;
 };
 
 type OtpRow = {
@@ -70,23 +82,61 @@ function purgeExpired() {
   store.sessions = store.sessions.filter((s) => s.expiresAt > now);
 }
 
-export function getUserById(id: string) {
-  return store.users.find((u) => u.id === id);
+export function computePeriodEndsAt(opts: {
+  periodDays: number;
+  testGraceMinutes?: number;
+  from?: Date;
+}): string {
+  const from = opts.from ?? new Date();
+  const d = new Date(from.getTime());
+  const testMin = Number(opts.testGraceMinutes ?? 0);
+  if (testMin > 0) {
+    d.setTime(d.getTime() + testMin * 60_000);
+  } else {
+    d.setDate(d.getDate() + Math.max(1, Math.round(opts.periodDays)));
+  }
+  return d.toISOString();
 }
 
-export function getUserByEmail(email: string) {
-  const e = normEmail(email);
-  return store.users.find((u) => u.email === e);
+/** Fin de acceso tras cancelar / fallar cobro: período ya pago, no 3 días fijos. */
+export function paidPeriodEndsAt(opts: {
+  existingPeriodEndsAt?: string;
+  nextPaymentDate?: string;
+  periodDays: number;
+}): string {
+  const existing = opts.existingPeriodEndsAt;
+  if (existing && new Date(existing).getTime() > Date.now()) return existing;
+  const next = opts.nextPaymentDate;
+  if (next && new Date(next).getTime() > Date.now()) return new Date(next).toISOString();
+  return computePeriodEndsAt({ periodDays: Math.max(1, opts.periodDays) });
 }
 
-export function getEntitlement(userId: string): Entitlement {
-  return (
-    store.entitlements.find((x) => x.userId === userId) ?? {
-      userId,
-      status: "none",
-      updatedAt: new Date().toISOString(),
-    }
-  );
+export function daysLeftUntil(iso?: string): number | null {
+  if (!iso) return null;
+  const end = new Date(iso).getTime();
+  if (Number.isNaN(end)) return null;
+  const ms = end - Date.now();
+  if (ms <= 0) return 0;
+  return Math.max(1, Math.ceil(ms / 86_400_000));
+}
+
+export function graceLabelUntil(iso?: string): string | null {
+  if (!iso) return null;
+  const end = new Date(iso).getTime();
+  if (Number.isNaN(end)) return null;
+  const ms = end - Date.now();
+  if (ms <= 0) return "0 días";
+  if (ms < 60_000) return "menos de 1 minuto";
+  if (ms < 3_600_000) {
+    const mins = Math.ceil(ms / 60_000);
+    return `${mins} minuto${mins === 1 ? "" : "s"}`;
+  }
+  if (ms < 86_400_000) {
+    const hours = Math.ceil(ms / 3_600_000);
+    return `${hours} hora${hours === 1 ? "" : "s"}`;
+  }
+  const days = Math.ceil(ms / 86_400_000);
+  return `${days} día${days === 1 ? "" : "s"}`;
 }
 
 export function upsertEntitlement(next: Entitlement) {
@@ -96,10 +146,77 @@ export function upsertEntitlement(next: Entitlement) {
   persist();
 }
 
+/** Merge parcial preservando vault (customer/card) y refs MP. */
+export function patchEntitlement(
+  userId: string,
+  patch: Partial<Omit<Entitlement, "userId">> & {
+    clearPeriodEndsAt?: boolean;
+  },
+): Entitlement {
+  const prev = getEntitlement(userId);
+  const { clearPeriodEndsAt, ...rest } = patch;
+  const next: Entitlement = {
+    ...prev,
+    ...Object.fromEntries(
+      Object.entries(rest).filter(([, v]) => v !== undefined),
+    ),
+    userId,
+    updatedAt: new Date().toISOString(),
+  } as Entitlement;
+  if (clearPeriodEndsAt) delete next.periodEndsAt;
+  upsertEntitlement(next);
+  return next;
+}
+
+export function findUserIdByPreapprovalId(preapprovalId: string): string | undefined {
+  const hit = store.entitlements.find((e) => e.mpPreapprovalId === preapprovalId);
+  return hit?.userId;
+}
+
+/** Si el período venció, persiste expired. */
+export function getEntitlement(userId: string): Entitlement {
+  let e =
+    store.entitlements.find((x) => x.userId === userId) ?? {
+      userId,
+      status: "none" as const,
+      updatedAt: new Date().toISOString(),
+    };
+  if (
+    e.status === "active" &&
+    e.periodEndsAt &&
+    Date.now() >= new Date(e.periodEndsAt).getTime()
+  ) {
+    e = {
+      ...e,
+      status: "expired",
+      updatedAt: new Date().toISOString(),
+    };
+    upsertEntitlement(e);
+  }
+  return e;
+}
+
+export function toEntitlementView(e: Entitlement): EntitlementView {
+  return {
+    ...e,
+    daysLeft: daysLeftUntil(e.periodEndsAt),
+    graceLabel: graceLabelUntil(e.periodEndsAt),
+  };
+}
+
+export function getUserById(id: string) {
+  return store.users.find((u) => u.id === id);
+}
+
+export function getUserByEmail(email: string) {
+  const e = normEmail(email);
+  return store.users.find((u) => u.email === e);
+}
+
 export function listUsers() {
   return store.users.map((u) => ({
     ...u,
-    entitlement: getEntitlement(u.id),
+    entitlement: toEntitlementView(getEntitlement(u.id)),
   }));
 }
 
@@ -154,7 +271,9 @@ export function verifyOtp(opts: {
   email: string;
   code: string;
   name?: string;
-}): { ok: true; user: AuthUser; sessionToken: string; entitlement: Entitlement } | { ok: false; error: string } {
+}):
+  | { ok: true; user: AuthUser; sessionToken: string; entitlement: EntitlementView }
+  | { ok: false; error: string } {
   purgeExpired();
   const email = normEmail(opts.email);
   const row = store.otps.find((o) => o.email === email);
@@ -183,17 +302,24 @@ export function verifyOtp(opts: {
     expiresAt: Date.now() + SESSION_TTL_MS,
   });
   persist();
-  return { ok: true, user, sessionToken, entitlement: getEntitlement(user.id) };
+  return {
+    ok: true,
+    user,
+    sessionToken,
+    entitlement: toEntitlementView(getEntitlement(user.id)),
+  };
 }
 
-export function sessionFromToken(token: string | undefined): { user: AuthUser; entitlement: Entitlement } | null {
+export function sessionFromToken(
+  token: string | undefined,
+): { user: AuthUser; entitlement: EntitlementView } | null {
   if (!token) return null;
   purgeExpired();
   const row = store.sessions.find((s) => s.tokenHash === hash(token));
   if (!row || row.expiresAt < Date.now()) return null;
   const user = getUserById(row.userId);
   if (!user) return null;
-  return { user, entitlement: getEntitlement(user.id) };
+  return { user, entitlement: toEntitlementView(getEntitlement(user.id)) };
 }
 
 export function revokeSession(token: string | undefined) {
@@ -202,12 +328,12 @@ export function revokeSession(token: string | undefined) {
   persist();
 }
 
-/** Alta/sesión vía Google (ya verificado por Firebase en el cliente). */
+/** Alta/sesión vía email verificado (legacy Google path). */
 export function loginWithVerifiedEmail(opts: {
   email: string;
   name?: string;
   firebaseUid?: string;
-}): { user: AuthUser; sessionToken: string; entitlement: Entitlement } {
+}): { user: AuthUser; sessionToken: string; entitlement: EntitlementView } {
   const user = upsertUser(opts);
   const sessionToken = randomBytes(32).toString("hex");
   store.sessions.push({
@@ -216,5 +342,9 @@ export function loginWithVerifiedEmail(opts: {
     expiresAt: Date.now() + SESSION_TTL_MS,
   });
   persist();
-  return { user, sessionToken, entitlement: getEntitlement(user.id) };
+  return {
+    user,
+    sessionToken,
+    entitlement: toEntitlementView(getEntitlement(user.id)),
+  };
 }

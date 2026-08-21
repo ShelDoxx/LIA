@@ -34,7 +34,7 @@ function clearPendingPlan() {
 }
 
 export function Activar() {
-  const { state, save, refreshEntitlement } = useLia();
+  const { state, save, refreshEntitlement, entitlement, entitlementStatus } = useLia();
   const [params] = useSearchParams();
   const sub = state.producer.subscription;
   const meetPending = sub?.status === "active" && sub.setupMeetPending;
@@ -93,7 +93,6 @@ export function Activar() {
     await tryAutoActivate({ op: operationId, plan: pendingPlan ?? "self" });
   }
 
-  // Solo auto si MP devolvió un id de operación en la URL
   useEffect(() => {
     if (autoTried.current || sub?.status === "active") return;
     const planParam = params.get("plan");
@@ -142,15 +141,34 @@ export function Activar() {
         <p className="text-xs font-medium uppercase tracking-[0.18em] text-gold">Plan Estudio</p>
         <h1 className="mt-1 font-serif text-3xl text-forest">Elegí cómo querés arrancar</h1>
         <p className="mt-2 text-sm text-ink-soft">
-          Self-service o setup completo. Un pago de Mercado Pago activa una sola cuenta: pegá el
-          número de operación para verificar.
+          Precios en dólares. El cobro es en pesos al tipo de cambio fijado. Pagás con tarjeta acá
+          mismo; el plan se activa al instante.
         </p>
       </div>
 
       {msg ? <p className="text-sm text-gold">{msg}</p> : null}
       {err ? <p className="text-sm text-danger">{err}</p> : null}
 
-      {meetPending ? (
+      {entitlementStatus === "expired" ||
+      (entitlement?.renewalRequired && entitlementStatus !== "active") ? (
+        <Card className="border-danger/40 bg-red-50 p-5">
+          <p className="font-serif text-xl text-forest">Membresía vencida</p>
+          <p className="mt-2 text-sm text-ink-soft">
+            El período del Setup terminó y no quedó cobro mensual. Pagá Self USD 49/mes para
+            reactivar el escritorio.
+          </p>
+        </Card>
+      ) : entitlement?.renewalRequired && entitlement.graceLabel ? (
+        <Card className="border-danger/40 bg-red-50 p-5">
+          <p className="font-serif text-xl text-forest">Renovación pendiente</p>
+          <p className="mt-2 text-sm text-ink-soft">
+            Quedan <strong>{entitlement.graceLabel}</strong> de acceso. Configurá el cobro mensual o
+            renová el plan para no perder el escritorio.
+          </p>
+        </Card>
+      ) : null}
+
+      {meetPending && !entitlement?.renewalRequired && entitlementStatus === "active" ? (
         <Card className="border-gold/40 bg-gold/5 p-6">
           <h2 className="font-serif text-2xl text-forest">Plan activo · coordinemos el setup</h2>
           <p className="mt-2 text-sm text-ink-soft">
@@ -163,7 +181,9 @@ export function Activar() {
             Ir al escritorio
           </Link>
         </Card>
-      ) : sub?.status === "active" ? (
+      ) : sub?.status === "active" &&
+        entitlementStatus === "active" &&
+        !entitlement?.renewalRequired ? (
         <Card className="p-6">
           <p className="font-serif text-xl text-forest">Ya tenés el plan activo.</p>
           <Link to="/">
@@ -172,11 +192,17 @@ export function Activar() {
         </Card>
       ) : (
         <>
-          <Card className="border-gold/40 bg-gold/5 p-5">
-            <p className="font-serif text-xl text-forest">Ya pagué — verificar</p>
+          <CheckoutPlans
+            producerName={state.producer.name}
+            payerEmail={state.producer.email}
+            onActivate={onDemoActivate}
+            onPaid={(r) => applyActivation(r.plan, r.setupMeetPending)}
+          />
+          <Card className="border-line p-5">
+            <p className="font-serif text-lg text-forest">¿Ya pagaste por otro lado?</p>
             <p className="mt-2 text-sm text-ink-soft">
-              Pegá el número de <strong>Operación</strong> de la pantalla verde. Ese número solo
-              puede activar <strong>una</strong> cuenta.
+              Pegá el número de <strong>Operación</strong> de Mercado Pago para vincular el pago a
+              esta cuenta.
             </p>
             <div className="mt-4">
               <Field label="Número de operación MP">
@@ -195,7 +221,6 @@ export function Activar() {
               </Button>
             </div>
           </Card>
-          <CheckoutPlans producerName={state.producer.name} onActivate={onDemoActivate} />
         </>
       )}
     </div>

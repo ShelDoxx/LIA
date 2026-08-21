@@ -46,13 +46,14 @@ function Guard({ children }: { children: React.ReactNode }) {
   return children;
 }
 
-/** Estudio sin entitlement activo solo /activar. Demo y admin libres. */
+/** Estudio sin entitlement activo solo /activar. Demo libre. Admin libre salvo membresía vencida. */
 function PaidGuard({ children }: { children: React.ReactNode }) {
   const { state, entitlementStatus, isAdmin } = useLia();
   const location = useLocation();
   const path = location.pathname;
   if (state?.producer.plan === "demo") return children;
-  if (isAdmin) return children;
+  // Admin puede usar ops (/admin fuera de este guard). En escritorio, vencido = bloqueo igual.
+  if (isAdmin && entitlementStatus !== "expired") return children;
   if (entitlementStatus === "active" || entitlementStatus === "trial") return children;
   if (path === "/activar" || path.startsWith("/activar")) return children;
   return <Navigate to="/activar" replace />;
