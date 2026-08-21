@@ -50,6 +50,13 @@ import {
   fetchPreapproval,
 } from "./mpSubscription.js";
 
+function brickAmounts() {
+  return computeBrickAmounts(config.mpUsdArsRate, {
+    arsSelf: config.mpArsSelf,
+    arsSetup: config.mpArsSetup,
+  });
+}
+
 const app = express();
 
 const ALLOWED_ORIGINS = [
@@ -502,7 +509,7 @@ app.get("/mercadopago/webhook", async (req, res) => {
 });
 
 app.get("/billing/checkout-config", (_req, res) => {
-  const amounts = computeBrickAmounts(config.mpUsdArsRate);
+  const amounts = brickAmounts();
   res.json({
     ok: true,
     selfUrl: config.mpCheckoutSelfUrl || "",
@@ -511,6 +518,7 @@ app.get("/billing/checkout-config", (_req, res) => {
     brickEnabled: Boolean(config.mpAccessToken && config.mpPublicKey),
     publicKey: config.mpPublicKey || "",
     amounts,
+    testMode: Boolean(amounts.testMode),
     webhookUrl: config.mpWebhookPublicUrl,
     backUrlSelf: `${config.mpBackUrlBase}?paid=1&plan=self`,
     backUrlSetup: `${config.mpBackUrlBase}?paid=1&plan=setup`,
@@ -533,7 +541,7 @@ app.post("/billing/process-card", async (req, res) => {
     res.status(400).json({ ok: false, error: "Plan inválido" });
     return;
   }
-  const amounts = computeBrickAmounts(config.mpUsdArsRate);
+  const amounts = brickAmounts();
   try {
     const result = await processBrickCheckout({
       accessToken: config.mpAccessToken,
@@ -611,7 +619,7 @@ app.post("/billing/attach-card", async (req, res) => {
     res.status(503).json({ ok: false, error: "Mercado Pago no configurado" });
     return;
   }
-  const amounts = computeBrickAmounts(config.mpUsdArsRate);
+  const amounts = brickAmounts();
   try {
     const result = await attachMonthlyWithCard({
       accessToken: config.mpAccessToken,

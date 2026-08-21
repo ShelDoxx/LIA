@@ -20,6 +20,12 @@ export const config = {
   mpPublicKey: process.env.MP_PUBLIC_KEY ?? "",
   /** Tipo de cambio ARS por 1 USD (cobro fijo: 49×TC / 149×TC) */
   mpUsdArsRate: Number(process.env.MP_USD_ARS_RATE ?? 1550),
+  /**
+   * Override ARS para prueba real en MP (ej. 10 y 20).
+   * Si están vacíos → 49×TC / 149×TC.
+   */
+  mpArsSelf: process.env.MP_ARS_SELF ? Number(process.env.MP_ARS_SELF) : undefined,
+  mpArsSetup: process.env.MP_ARS_SETUP ? Number(process.env.MP_ARS_SETUP) : undefined,
   /** Links públicos de checkout (legacy; Brick es el camino principal) */
   mpCheckoutSelfUrl: process.env.MP_CHECKOUT_SELF_URL ?? "",
   mpCheckoutSetupUrl: process.env.MP_CHECKOUT_SETUP_URL ?? "",

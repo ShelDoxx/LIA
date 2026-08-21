@@ -44,10 +44,13 @@ export function MpCardBrick({ plan, publicKey, amounts, payerEmail, onSuccess, o
           <strong>
             {amount.toLocaleString("es-AR")} ARS
           </strong>
-          {plan === "setup"
+          {amounts.testMode ? " · monto de prueba" : null}
+          {plan === "setup" && !amounts.testMode
             ? ` (después USD ${amounts.usdSelf}/mes = ${amounts.arsSelf.toLocaleString("es-AR")} ARS)`
-            : " · suscripción mensual"}
-          . TC {amounts.fxArs.toLocaleString("es-AR")}.
+            : plan === "setup" && amounts.testMode
+              ? ` (después ${amounts.arsSelf.toLocaleString("es-AR")} ARS/mes)`
+              : " · suscripción mensual"}
+          {!amounts.testMode ? `. TC ${amounts.fxArs.toLocaleString("es-AR")}.` : "."}
         </p>
       </div>
 

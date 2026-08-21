@@ -140,6 +140,7 @@ export type BrickAmounts = {
   fxArs: number;
   arsSelf: number;
   arsSetup: number;
+  testMode?: boolean;
 };
 
 /** Procesa el formData del Card Payment Brick en el bot. */
