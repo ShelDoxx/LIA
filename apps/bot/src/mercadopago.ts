@@ -358,23 +358,30 @@ export async function handleMercadoPagoNotification(opts: {
       external_reference?: string;
       payer?: { email?: string };
       description?: string;
+      operation_type?: string;
+      metadata?: { lia_plan?: string; lia_user_id?: string };
     };
     const amount = data.transaction_amount;
-    const plan = detectPlan(amount, `${data.external_reference ?? ""} ${data.description ?? ""}`);
+    const op = (data.operation_type ?? "").toLowerCase();
+    const desc = data.description ?? "";
+    // MP crea pagos $0 "Recurring payment validation" al tokenizar — no son cobros.
+    const isCardValidation =
+      op === "card_validation" || /validation/i.test(desc) || !(typeof amount === "number" && amount >= 15);
+    const plan = detectPlan(
+      amount,
+      `${data.external_reference ?? ""} ${desc} ${data.metadata?.lia_plan ?? ""}`,
+    );
     let status: BillingActivation["status"] = "pending";
-    // Ignorar validaciones MP / montos basura (p.ej. $0) — no desbloquean Estudio.
-    const amountOk = typeof amount === "number" && amount >= 1;
-    if (isPaymentApproved(data.status) && amountOk) status = "active";
+    if (isCardValidation) {
+      console.log("[mp] payment ignorado (validación/monto)", data.id ?? id, amount, op || desc);
+    } else if (isPaymentApproved(data.status)) status = "active";
     else if (isDeadPaymentStatus(data.status)) status = "cancelled";
-    else if (isPaymentApproved(data.status) && !amountOk) {
-      console.log("[mp] payment approved ignorado (monto inválido)", amount, id);
-    }
     const activation: BillingActivation = {
       id: crypto.randomUUID(),
       plan,
       status,
       email: data.payer?.email,
-      externalReference: data.external_reference,
+      externalReference: data.external_reference || data.metadata?.lia_user_id,
       mpPaymentId: String(data.id ?? id),
       amount,
       currency: data.currency_id,

@@ -453,39 +453,58 @@ app.post("/mercadopago/webhook", async (req, res) => {
     if (act && userId) {
       const prev = listUsers().find((u) => u.id === userId)?.entitlement;
       if (act.status === "active") {
-        patchEntitlement(userId, {
-          status: "active",
-          plan: act.plan ?? prev?.plan,
-          mpPaymentId: act.mpPaymentId ?? prev?.mpPaymentId,
-          mpPreapprovalId: act.mpPreapprovalId ?? prev?.mpPreapprovalId,
-          renewalRequired: false,
-          clearPeriodEndsAt: true,
-        });
-        console.log("[mp] webhook → entitlement", userId, act.plan);
-      } else if (act.status === "cancelled") {
-        let nextPaymentDate: string | undefined;
-        if (act.mpPreapprovalId && config.mpAccessToken) {
-          const pre = await fetchPreapproval({
-            accessToken: config.mpAccessToken,
-            preapprovalId: act.mpPreapprovalId,
+        // Solo activar con cobro real. Validaciones MP ($0) y preapproval sin plata no cuentan.
+        if (!act.mpPaymentId && !prev?.mpPaymentId) {
+          console.log("[mp] active ignorado — sin cobro real", userId, act.rawType);
+        } else {
+          patchEntitlement(userId, {
+            status: "active",
+            plan: act.plan ?? prev?.plan,
+            mpPaymentId: act.mpPaymentId ?? prev?.mpPaymentId,
+            mpPreapprovalId: act.mpPreapprovalId ?? prev?.mpPreapprovalId,
+            renewalRequired: false,
+            clearPeriodEndsAt: true,
           });
-          nextPaymentDate = pre.nextPaymentDate;
+          console.log("[mp] webhook → entitlement", userId, act.plan, act.mpPaymentId);
         }
-        const periodEndsAt = paidPeriodEndsAt({
-          existingPeriodEndsAt: prev?.periodEndsAt,
-          nextPaymentDate,
-          membershipStartedAt: prev?.membershipStartedAt,
-          periodDays: config.billingPeriodDays,
-        });
-        patchEntitlement(userId, {
-          status: "active",
-          plan: prev?.plan ?? act.plan,
-          mpPaymentId: prev?.mpPaymentId ?? act.mpPaymentId,
-          mpPreapprovalId: act.mpPreapprovalId ?? prev?.mpPreapprovalId,
-          periodEndsAt,
-          renewalRequired: true,
-        });
-        console.log("[mp] webhook → renewal grace", userId, periodEndsAt);
+      } else if (act.status === "cancelled") {
+        // Gracia solo si hubo cobro real. Cancelar preapproval huérfano NO regala acceso.
+        if (!prev?.mpPaymentId) {
+          console.log("[mp] cancel ignorado — sin cobro previo", userId, act.mpPreapprovalId);
+          if (prev?.status === "active") {
+            patchEntitlement(userId, {
+              status: "none",
+              plan: prev.plan,
+              clearPeriodEndsAt: true,
+              renewalRequired: false,
+            });
+            console.log("[mp] revocado acceso sin cobro", userId);
+          }
+        } else {
+          let nextPaymentDate: string | undefined;
+          if (act.mpPreapprovalId && config.mpAccessToken) {
+            const pre = await fetchPreapproval({
+              accessToken: config.mpAccessToken,
+              preapprovalId: act.mpPreapprovalId,
+            });
+            nextPaymentDate = pre.nextPaymentDate;
+          }
+          const periodEndsAt = paidPeriodEndsAt({
+            existingPeriodEndsAt: prev?.periodEndsAt,
+            nextPaymentDate,
+            membershipStartedAt: prev?.membershipStartedAt,
+            periodDays: config.billingPeriodDays,
+          });
+          patchEntitlement(userId, {
+            status: "active",
+            plan: prev?.plan ?? act.plan,
+            mpPaymentId: prev?.mpPaymentId ?? act.mpPaymentId,
+            mpPreapprovalId: act.mpPreapprovalId ?? prev?.mpPreapprovalId,
+            periodEndsAt,
+            renewalRequired: true,
+          });
+          console.log("[mp] webhook → renewal grace", userId, periodEndsAt);
+        }
       }
     }
   } catch (err) {
