@@ -68,8 +68,7 @@ export function MpCardBrick({ plan, publicKey, amounts, payerEmail, onSuccess, o
         <p className="text-xs font-medium uppercase tracking-wide text-gold">Cobrando</p>
         <p className="font-serif text-xl text-forest">Procesando con Mercado Pago…</p>
         <p className="text-sm text-ink-soft">
-          No cierres esta ventana. Esperamos la acreditación del cobro (
-          {amount.toLocaleString("es-AR")} ARS).
+          A veces MP revisa el cobro unos segundos. No cierres esta ventana ni vuelvas a pagar.
         </p>
       </div>
     );
