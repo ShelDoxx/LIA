@@ -164,8 +164,8 @@ export function Activar() {
           <p className="mt-2 text-sm text-ink-soft">
             Tu pago ya está acreditado. Si Mercado Pago no pudo guardar la tarjeta (pasa con
             prepagas), cargá una crédito/débito en{" "}
-            <Link to="/ajustes" className="underline">
-              Ajustes → Membresía
+            <Link to="/suscripcion" className="underline">
+              Suscripción
             </Link>{" "}
             para el mes que viene. Si ya quedó enganchada, no tenés que hacer nada.
           </p>

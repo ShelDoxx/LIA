@@ -22,6 +22,9 @@ const PdfPack = lazy(() => import("./pages/PdfPack").then((m) => ({ default: m.P
 const Siniestros = lazy(() => import("./pages/Siniestros").then((m) => ({ default: m.Siniestros })));
 const PublicDoc = lazy(() => import("./pages/PublicDoc").then((m) => ({ default: m.PublicDoc })));
 const Activar = lazy(() => import("./pages/Activar").then((m) => ({ default: m.Activar })));
+const Subscription = lazy(() =>
+  import("./pages/Subscription").then((m) => ({ default: m.Subscription })),
+);
 const Admin = lazy(() => import("./pages/Admin").then((m) => ({ default: m.Admin })));
 
 function PageLoader() {
@@ -118,6 +121,7 @@ export default function App() {
         <Route path="cobranzas" element={<Lazy><Cobranzas /></Lazy>} />
         <Route path="emergencias" element={<Lazy><Emergencias /></Lazy>} />
         <Route path="ajustes" element={<Lazy><Settings /></Lazy>} />
+        <Route path="suscripcion" element={<Lazy><Subscription /></Lazy>} />
         <Route path="activar" element={<Lazy><Activar /></Lazy>} />
         <Route path="expediente" element={<Lazy><PdfPack /></Lazy>} />
       </Route>

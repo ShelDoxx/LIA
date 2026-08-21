@@ -3,7 +3,6 @@ import { useLia } from "@/context/LiaContext";
 import { CsvImporter } from "@/components/CsvImporter";
 import { MetaWizard } from "@/components/MetaWizard";
 import { Badge, Button, Card, Field, inputClass } from "@/components/ui";
-import { MembershipPanel } from "@/components/MembershipPanel";
 import { ALL_RAMOS, POLICY_LABEL, type LiaState } from "@/lib/types";
 import { useState } from "react";
 
@@ -76,7 +75,17 @@ export function Settings() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      {p.plan === "estudio" ? <MembershipPanel /> : null}
+      {p.plan === "estudio" ? (
+        <Card className="flex flex-wrap items-center justify-between gap-3 border-gold/30 bg-gold/5 p-5">
+          <div>
+            <p className="font-serif text-lg text-forest">Suscripción Plan Estudio</p>
+            <p className="mt-1 text-sm text-ink-soft">Estado, próximo cobro y renovación automática.</p>
+          </div>
+          <Link to="/suscripcion">
+            <Button variant="gold">Ver suscripción</Button>
+          </Link>
+        </Card>
+      ) : null}
       <Card className="space-y-4 p-6">
         <h2 className="font-serif text-2xl">El estudio</h2>
         <Field label="Nombre del productor">

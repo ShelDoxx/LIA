@@ -17,6 +17,7 @@ import {
   Wallet,
   FileText,
   Shield,
+  CreditCard,
   X,
 } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -36,6 +37,7 @@ const primaryLinks: NavItem[] = [
   { to: "/whatsapp", label: "WhatsApp", icon: MessageCircle },
   { to: "/cobranzas", label: "Cobranzas", icon: Banknote },
   { to: "/vencimientos", label: "Renovar", icon: CalendarClock },
+  { to: "/suscripcion", label: "Suscripción", icon: CreditCard },
 ];
 
 const moreLinks: NavItem[] = [
@@ -336,10 +338,9 @@ export function Layout() {
           </div>
         ) : entitlement?.needsCardForMonthly && entitlementStatus === "active" ? (
           <div className="border-b border-gold/40 bg-gold/10 px-4 py-2 text-center text-sm text-forest md:px-8">
-            Mes pago. Si no ves cobro automático el mes que viene, cargá una tarjeta crédito/débito
-            en{" "}
-            <Link to="/ajustes" className="font-medium underline">
-              Membresía
+            Mes pago. Si falta renovación automática, revisá{" "}
+            <Link to="/suscripcion" className="font-medium underline">
+              Suscripción
             </Link>
             .
           </div>

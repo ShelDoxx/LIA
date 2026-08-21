@@ -318,10 +318,8 @@ export async function processBrickCheckout(opts: {
   }
 
   /**
-   * Self y Setup: cobrar YA con /v1/payments (approved inmediato).
-   * El preapproval de MP demora ~1h en el 1er authorized_payment — no sirve
-   * para desbloquear acceso en el checkout.
-   * Después enganchamos suscripción mensual con start_date = +1 mes.
+   * Cobrar YA (/v1/payments) y enganchar suscripción automática en el mismo request
+   * (card_id o token). El cliente no debería tener un 2º paso “guardar tarjeta”.
    */
   const isSetup = opts.plan === "setup";
   const amount = isSetup ? opts.amounts.arsSetup : opts.amounts.arsSelf;
@@ -351,7 +349,6 @@ export async function processBrickCheckout(opts: {
 
   const pay = await mpFetch("/v1/payments", opts.accessToken, {
     method: "POST",
-    // Una clave por intento de cobro (user + plan + token prefix) evita dobles cobros en retry.
     idempotencyKey: `${opts.userId}:${opts.plan}:${opts.card.token.slice(0, 24)}`.slice(0, 64),
     body: JSON.stringify(paymentBody),
   });
@@ -368,7 +365,6 @@ export async function processBrickCheckout(opts: {
   let payJson = pay.json;
   let payStatus = String(payJson.status ?? "").toLowerCase();
   const paymentId = String(payJson.id ?? "");
-  // MP a veces responde in_process/pending y acredita (o rechaza) segundos después.
   if (paymentId && (payStatus === "in_process" || payStatus === "pending")) {
     console.log("[mp] payment waiting resolution", paymentId, payStatus);
     const resolved = await waitForPaymentStatus(paymentId, opts.accessToken, {
@@ -407,7 +403,7 @@ export async function processBrickCheckout(opts: {
       mpPaymentId: paymentId || undefined,
     };
   }
-  // Regla dura: sin payment id + monto real no hay activación.
+
   const charged = Number(payJson.transaction_amount ?? amount);
   if (!paymentId || !(charged >= 15)) {
     console.error("[mp] cobro inválido para activar", paymentId, charged, opts.plan);
@@ -424,7 +420,6 @@ export async function processBrickCheckout(opts: {
   let cardId = payCard?.id != null ? String(payCard.id) : undefined;
   let lastFour = payCard?.last_four_digits ? String(payCard.last_four_digits) : undefined;
 
-  // 1) Tarjetas vaultables: MP suele devolver card.id. Si no, intentamos guardar el token.
   if (customerId && !cardId && opts.card.token) {
     const saved = await saveCardToCustomer({
       accessToken: opts.accessToken,
@@ -448,9 +443,6 @@ export async function processBrickCheckout(opts: {
     }
   }
 
-  // 2) Enganche mensual automático (sin pedir “Guardar” al cliente).
-  //    Preferimos card_id; si no hay (p.ej. prepaga), reintentamos con el mismo token.
-  let preapprovalId: string | undefined;
   const subBase = {
     accessToken: opts.accessToken,
     userId: opts.userId,
@@ -460,6 +452,7 @@ export async function processBrickCheckout(opts: {
     startNextMonth: true as const,
     reasonSuffix: isSetup ? " (post-setup)" : " (post-self)",
   };
+  let preapprovalId: string | undefined;
   if (cardId) {
     const sub = await createMonthlyPreapproval({ ...subBase, cardId });
     if (sub.ok) preapprovalId = sub.preapprovalId;
@@ -472,11 +465,9 @@ export async function processBrickCheckout(opts: {
     });
     if (sub.ok) {
       preapprovalId = sub.preapprovalId;
-      console.log("[mp] preapproval via card_token_id", preapprovalId);
+      console.log("[mp] preapproval via card_token_id (auto)", preapprovalId);
     } else {
-      console.warn("[mp]", opts.plan, "preapproval token failed", sub.detail, {
-        isPrepaid,
-      });
+      console.warn("[mp]", opts.plan, "preapproval token failed", sub.detail, { isPrepaid });
     }
   }
   if (!preapprovalId) {
