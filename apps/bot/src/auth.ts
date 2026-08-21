@@ -193,6 +193,14 @@ export function patchEntitlement(
     updatedAt: new Date().toISOString(),
   } as Entitlement;
   if (clearPeriodEndsAt) delete next.periodEndsAt;
+  if (next.status === "active" && !next.mpPaymentId) {
+    console.error(
+      "[SECURITY] entitlement active sin mpPaymentId — revisar",
+      userId,
+      next.plan,
+      next.mpPreapprovalId,
+    );
+  }
   upsertEntitlement(next);
   return next;
 }

@@ -8,12 +8,15 @@ export type MembershipInfo = {
   periodEndsAt?: string;
   daysLeft?: number | null;
   graceLabel?: string | null;
+  mpPaymentId?: string;
   mpPreapprovalId?: string;
   mpCustomerId?: string;
   cardLastFour?: string;
   mpStatus?: string;
   nextPaymentDate?: string;
   amountArs?: number;
+  lastChargeAmount?: number;
+  lastChargeStatus?: string;
   canCancel?: boolean;
 };
 

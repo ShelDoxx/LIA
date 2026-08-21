@@ -96,10 +96,28 @@ export function MembershipPanel() {
             </li>
           ) : null}
           {info.amountArs != null ? (
-            <li>Cobro: {info.amountArs.toLocaleString("es-AR")} ARS / mes</li>
+            <li>Cobro mensual: {info.amountArs.toLocaleString("es-AR")} ARS</li>
           ) : null}
           {info.nextPaymentDate ? (
             <li>Próximo cobro: {new Date(info.nextPaymentDate).toLocaleDateString("es-AR")}</li>
+          ) : null}
+          {info.lastChargeAmount != null ? (
+            <li>
+              Último cobro:{" "}
+              <strong className="text-forest">
+                {info.lastChargeAmount.toLocaleString("es-AR")} ARS
+              </strong>
+              {info.lastChargeStatus ? ` · ${info.lastChargeStatus}` : ""}
+            </li>
+          ) : info.status === "active" && !info.mpPaymentId ? (
+            <li className="text-danger">
+              Sin cobro acreditado en Lía (revisá antes de confiar en el acceso).
+            </li>
+          ) : null}
+          {info.mpPaymentId ? (
+            <li>
+              Operación MP: <strong className="text-forest">{info.mpPaymentId}</strong>
+            </li>
           ) : null}
           {info.renewalRequired && info.graceLabel ? (
             <li className="text-danger">

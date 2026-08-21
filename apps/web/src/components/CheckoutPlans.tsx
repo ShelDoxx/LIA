@@ -16,7 +16,12 @@ type Props = {
   producerName?: string;
   payerEmail?: string;
   onActivate: (plan: SubscriptionPlan) => void;
-  onPaid: (result: { plan: SubscriptionPlan; setupMeetPending?: boolean }) => void;
+  onPaid: (result: {
+    plan: SubscriptionPlan;
+    setupMeetPending?: boolean;
+    amount?: number;
+    mpPaymentId?: string;
+  }) => void;
   compact?: boolean;
 };
 

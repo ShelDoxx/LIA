@@ -160,6 +160,43 @@ export async function createMonthlyPreapproval(opts: {
   return { ok: true, preapprovalId: preId, status };
 }
 
+/** Cancela preapprovals authorized/pending del mismo user (evita cobros huérfanos al reintentar). */
+export async function cancelOrphanPreapprovalsForUser(opts: {
+  accessToken: string;
+  userId: string;
+  keepId?: string;
+}): Promise<number> {
+  const search = await mpFetch(
+    `/preapproval/search?external_reference=${encodeURIComponent(opts.userId)}&status=authorized`,
+    opts.accessToken,
+  );
+  const results =
+    (search.json.results as Array<{ id?: string; status?: string }> | undefined) ?? [];
+  // También pending
+  const searchPending = await mpFetch(
+    `/preapproval/search?external_reference=${encodeURIComponent(opts.userId)}&status=pending`,
+    opts.accessToken,
+  );
+  const pending =
+    (searchPending.json.results as Array<{ id?: string; status?: string }> | undefined) ?? [];
+  const all = [...results, ...pending];
+  let n = 0;
+  const seen = new Set<string>();
+  for (const row of all) {
+    const id = row.id ? String(row.id) : "";
+    if (!id || seen.has(id) || id === opts.keepId) continue;
+    seen.add(id);
+    const st = String(row.status ?? "").toLowerCase();
+    if (st === "cancelled" || st === "canceled" || st === "paused") continue;
+    const r = await cancelPreapproval({ accessToken: opts.accessToken, preapprovalId: id });
+    if (r.ok) {
+      n += 1;
+      console.log("[mp] orphan preapproval cancelled", id, opts.userId);
+    }
+  }
+  return n;
+}
+
 /** Cancela suscripción en MP (status canceled). */
 export async function cancelPreapproval(opts: {
   accessToken: string;
@@ -239,6 +276,16 @@ export async function processBrickCheckout(opts: {
     email,
   });
 
+  // Limpiar suscripciones huérfanas de reintentos anteriores (mismo userId).
+  try {
+    await cancelOrphanPreapprovalsForUser({
+      accessToken: opts.accessToken,
+      userId: opts.userId,
+    });
+  } catch (err) {
+    console.warn("[mp] orphan cleanup failed", err);
+  }
+
   /**
    * Self y Setup: cobrar YA con /v1/payments (approved inmediato).
    * El preapproval de MP demora ~1h en el 1er authorized_payment — no sirve
@@ -286,6 +333,15 @@ export async function processBrickCheckout(opts: {
       detail: `Mercado Pago no aprobó el pago (estado: ${payStatus || "?"}).`,
     };
   }
+  // Regla dura: sin payment id + monto real no hay activación.
+  const charged = Number(pay.json.transaction_amount ?? amount);
+  if (!paymentId || !(charged >= 15)) {
+    console.error("[mp] cobro inválido para activar", paymentId, charged, opts.plan);
+    return {
+      ok: false,
+      detail: "Mercado Pago no acreditó un cobro válido. Reintentá o usá otra tarjeta.",
+    };
+  }
 
   const payCard = pay.json.card as
     | { id?: string | number; last_four_digits?: string }
@@ -330,7 +386,7 @@ export async function processBrickCheckout(opts: {
     mpPreapprovalId: preapprovalId,
     mpCustomerId: customerId,
     cardLastFour: lastFour,
-    amount,
+    amount: charged,
     detail: isSetup
       ? preapprovalId
         ? "setup_paid_and_subscribed"

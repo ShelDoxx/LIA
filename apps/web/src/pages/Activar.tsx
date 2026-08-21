@@ -45,7 +45,11 @@ export function Activar() {
   const [err, setErr] = useState("");
   const autoTried = useRef(false);
 
-  async function applyActivation(plan: SubscriptionPlan, setupMeetPending?: boolean) {
+  async function applyActivation(
+    plan: SubscriptionPlan,
+    setupMeetPending?: boolean,
+    receipt?: { amount?: number; mpPaymentId?: string },
+  ) {
     clearPendingPlan();
     setPendingPlan(null);
     await save({
@@ -63,7 +67,12 @@ export function Activar() {
       },
     });
     await refreshEntitlement();
-    setMsg(plan === "setup" ? "Pago verificado. Plan activo — coordiná el meet." : "Pago verificado. Plan Self activo.");
+    const bits = [
+      plan === "setup" ? "Pago verificado. Plan Setup activo." : "Pago verificado. Plan Self activo.",
+    ];
+    if (receipt?.amount != null) bits.push(`${receipt.amount.toLocaleString("es-AR")} ARS`);
+    if (receipt?.mpPaymentId) bits.push(`op. ${receipt.mpPaymentId}`);
+    setMsg(bits.join(" · "));
     setErr("");
   }
 
@@ -196,7 +205,12 @@ export function Activar() {
             producerName={state.producer.name}
             payerEmail={state.producer.email}
             onActivate={onDemoActivate}
-            onPaid={(r) => applyActivation(r.plan, r.setupMeetPending)}
+            onPaid={(r) =>
+              applyActivation(r.plan, r.setupMeetPending, {
+                amount: r.amount,
+                mpPaymentId: r.mpPaymentId,
+              })
+            }
           />
           <Card className="border-line p-5">
             <p className="font-serif text-lg text-forest">¿Ya pagaste por otro lado?</p>

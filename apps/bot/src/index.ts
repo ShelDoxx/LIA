@@ -581,6 +581,19 @@ app.post("/billing/process-card", async (req, res) => {
       res.status(400).json({ ok: false, error: result.detail || "No se pudo procesar el pago" });
       return;
     }
+    if (!result.mpPaymentId || !(Number(result.amount) >= 15)) {
+      console.error(
+        "[billing] rechazo activación sin cobro real",
+        sess.user.email,
+        result.mpPaymentId,
+        result.amount,
+      );
+      res.status(400).json({
+        ok: false,
+        error: "El pago no quedó acreditado. No se activó el plan. Reintentá.",
+      });
+      return;
+    }
     const renewalRequired =
       Boolean(result.needsCardForMonthly) || (result.plan === "setup" && !result.mpPreapprovalId);
     const periodEndsAt = renewalRequired
@@ -604,7 +617,8 @@ app.post("/billing/process-card", async (req, res) => {
       "[billing] brick → entitlement",
       sess.user.email,
       result.plan,
-      result.mpPaymentId ?? result.mpPreapprovalId,
+      result.mpPaymentId,
+      result.amount,
       renewalRequired ? `renewal_grace_until=${periodEndsAt}` : "ok",
     );
     const entitlement = toEntitlementView(
@@ -615,6 +629,8 @@ app.post("/billing/process-card", async (req, res) => {
       plan: result.plan,
       setupMeetPending: result.setupMeetPending,
       amount: result.amount,
+      mpPaymentId: result.mpPaymentId,
+      mpPreapprovalId: result.mpPreapprovalId,
       detail: result.detail,
       renewalRequired,
       periodEndsAt,
@@ -696,6 +712,8 @@ app.get("/billing/subscription", async (req, res) => {
   let mpStatus: string | undefined;
   let nextPaymentDate: string | undefined;
   let amount: number | undefined;
+  let lastChargeAmount: number | undefined;
+  let lastChargeStatus: string | undefined;
   if (ent.mpPreapprovalId && config.mpAccessToken) {
     const pre = await fetchPreapproval({
       accessToken: config.mpAccessToken,
@@ -707,6 +725,23 @@ app.get("/billing/subscription", async (req, res) => {
       amount = pre.amount;
     }
   }
+  if (ent.mpPaymentId && config.mpAccessToken) {
+    try {
+      const payRes = await fetch(`https://api.mercadopago.com/v1/payments/${ent.mpPaymentId}`, {
+        headers: { Authorization: `Bearer ${config.mpAccessToken}` },
+      });
+      if (payRes.ok) {
+        const pay = (await payRes.json()) as {
+          transaction_amount?: number;
+          status?: string;
+        };
+        lastChargeAmount = pay.transaction_amount;
+        lastChargeStatus = pay.status;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
   res.json({
     ok: true,
     subscription: {
@@ -716,12 +751,15 @@ app.get("/billing/subscription", async (req, res) => {
       periodEndsAt: ent.periodEndsAt,
       daysLeft: ent.daysLeft,
       graceLabel: ent.graceLabel,
+      mpPaymentId: ent.mpPaymentId,
       mpPreapprovalId: ent.mpPreapprovalId,
       mpCustomerId: ent.mpCustomerId,
       cardLastFour: ent.cardLastFour,
       mpStatus,
       nextPaymentDate,
       amountArs: amount,
+      lastChargeAmount,
+      lastChargeStatus,
       canCancel:
         Boolean(ent.mpPreapprovalId) &&
         mpStatus !== "canceled" &&

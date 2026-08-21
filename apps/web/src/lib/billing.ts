@@ -147,7 +147,14 @@ export type BrickAmounts = {
 export async function processBrickCardPayment(
   plan: SubscriptionPlan,
   formData: object,
-): Promise<{ ok: boolean; plan?: SubscriptionPlan; setupMeetPending?: boolean; error?: string }> {
+): Promise<{
+  ok: boolean;
+  plan?: SubscriptionPlan;
+  setupMeetPending?: boolean;
+  amount?: number;
+  mpPaymentId?: string;
+  error?: string;
+}> {
   try {
     const { botUrl } = await import("@/lib/botBase");
     const { getSessionToken } = await import("@/lib/authApi");
@@ -167,6 +174,8 @@ export async function processBrickCardPayment(
       ok?: boolean;
       plan?: SubscriptionPlan;
       setupMeetPending?: boolean;
+      amount?: number;
+      mpPaymentId?: string;
       error?: string;
     };
     if (!res.ok || !data.ok) {
@@ -176,6 +185,8 @@ export async function processBrickCardPayment(
       ok: true,
       plan: data.plan ?? plan,
       setupMeetPending: data.setupMeetPending,
+      amount: data.amount,
+      mpPaymentId: data.mpPaymentId,
     };
   } catch {
     return { ok: false, error: "No pude contactar al servidor de Lía" };
