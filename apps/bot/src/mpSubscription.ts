@@ -77,6 +77,25 @@ function nextMonthIso() {
   return d.toISOString();
 }
 
+/** Espera a que un pago deje de estar in_process/pending. */
+async function waitForPaymentStatus(
+  paymentId: string,
+  accessToken: string,
+  opts?: { attempts?: number; delayMs?: number },
+): Promise<Record<string, unknown> | null> {
+  const attempts = opts?.attempts ?? 12;
+  const delayMs = opts?.delayMs ?? 2500;
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, delayMs));
+    const res = await mpFetch(`/v1/payments/${paymentId}`, accessToken);
+    if (!res.ok) continue;
+    const st = String(res.json.status ?? "").toLowerCase();
+    if (st !== "in_process" && st !== "pending") return res.json;
+  }
+  const last = await mpFetch(`/v1/payments/${paymentId}`, accessToken);
+  return last.ok ? last.json : null;
+}
+
 export async function listCustomerCards(opts: {
   accessToken: string;
   customerId: string;
@@ -339,16 +358,51 @@ export async function processBrickCheckout(opts: {
         (isSetup ? "No se pudo cobrar el Setup" : "No se pudo cobrar el plan Self"),
     };
   }
-  const payStatus = String(pay.json.status ?? "").toLowerCase();
-  const paymentId = String(pay.json.id ?? "");
+
+  let payJson = pay.json;
+  let payStatus = String(payJson.status ?? "").toLowerCase();
+  const paymentId = String(payJson.id ?? "");
+  // MP a veces responde in_process/pending y acredita (o rechaza) segundos después.
+  if (paymentId && (payStatus === "in_process" || payStatus === "pending")) {
+    console.log("[mp] payment waiting resolution", paymentId, payStatus);
+    const resolved = await waitForPaymentStatus(paymentId, opts.accessToken, {
+      attempts: 12,
+      delayMs: 2500,
+    });
+    if (resolved) {
+      payJson = resolved;
+      payStatus = String(resolved.status ?? "").toLowerCase();
+    }
+  }
+
   if (payStatus !== "approved") {
+    const detail = String(payJson.status_detail ?? "");
+    console.warn("[mp] payment not approved", paymentId, payStatus, detail);
+    if (payStatus === "in_process" || payStatus === "pending") {
+      return {
+        ok: false,
+        detail:
+          "Mercado Pago todavía está revisando el cobro. En unos minutos, si lo acredita, el plan se activa solo. No vuelvas a pagar de inmediato.",
+        mpPaymentId: paymentId || undefined,
+      };
+    }
+    if (payStatus === "rejected" || payStatus === "cancelled" || payStatus === "canceled") {
+      return {
+        ok: false,
+        detail: detail
+          ? `Mercado Pago rechazó el pago (${detail}). Probá otra tarjeta.`
+          : "Mercado Pago rechazó el pago. Probá otra tarjeta.",
+        mpPaymentId: paymentId || undefined,
+      };
+    }
     return {
       ok: false,
       detail: `Mercado Pago no aprobó el pago (estado: ${payStatus || "?"}).`,
+      mpPaymentId: paymentId || undefined,
     };
   }
   // Regla dura: sin payment id + monto real no hay activación.
-  const charged = Number(pay.json.transaction_amount ?? amount);
+  const charged = Number(payJson.transaction_amount ?? amount);
   if (!paymentId || !(charged >= 15)) {
     console.error("[mp] cobro inválido para activar", paymentId, charged, opts.plan);
     return {
@@ -357,7 +411,7 @@ export async function processBrickCheckout(opts: {
     };
   }
 
-  const payCard = pay.json.card as
+  const payCard = payJson.card as
     | { id?: string | number; last_four_digits?: string }
     | undefined;
   let cardId = payCard?.id != null ? String(payCard.id) : undefined;
