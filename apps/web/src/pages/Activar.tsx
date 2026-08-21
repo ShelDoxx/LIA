@@ -160,13 +160,14 @@ export function Activar() {
         </Card>
       ) : entitlement?.needsCardForMonthly && entitlementStatus === "active" ? (
         <Card className="border-gold/40 bg-gold/5 p-5">
-          <p className="font-serif text-xl text-forest">Mes pago · falta cobro automático</p>
+          <p className="font-serif text-xl text-forest">Mes pago · cobro automático</p>
           <p className="mt-2 text-sm text-ink-soft">
-            Tu pago ya está acreditado. Para que el mes siguiente se cobre solo, guardá la tarjeta en{" "}
+            Tu pago ya está acreditado. Si Mercado Pago no pudo guardar la tarjeta (pasa con
+            prepagas), cargá una crédito/débito en{" "}
             <Link to="/ajustes" className="underline">
               Ajustes → Membresía
-            </Link>
-            .
+            </Link>{" "}
+            para el mes que viene. Si ya quedó enganchada, no tenés que hacer nada.
           </p>
         </Card>
       ) : null}

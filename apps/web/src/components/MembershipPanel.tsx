@@ -128,7 +128,8 @@ export function MembershipPanel() {
           ) : null}
           {info.needsCardForMonthly && !info.mpPreapprovalId ? (
             <li className="text-forest">
-              Mes pago · falta guardar tarjeta para el cobro automático del mes siguiente.
+              Mes pago · MP no enganchó el cobro automático (suele pasar con prepagas). Guardá una
+              crédito/débito abajo para el mes siguiente.
             </li>
           ) : null}
         </ul>

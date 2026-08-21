@@ -335,11 +335,17 @@ export async function processBrickCheckout(opts: {
     payment_method_id: opts.card.payment_method_id,
     external_reference: opts.userId,
     metadata: { lia_plan: opts.plan, lia_user_id: opts.userId },
-    payer: {
-      email,
-      identification: opts.card.payer?.identification,
-      ...(customerId ? { type: "customer", id: customerId } : {}),
-    },
+    payer: customerId
+      ? {
+          type: "customer",
+          id: customerId,
+          email,
+          identification: opts.card.payer?.identification,
+        }
+      : {
+          email,
+          identification: opts.card.payer?.identification,
+        },
   };
   if (opts.card.issuer_id) paymentBody.issuer_id = Number(opts.card.issuer_id);
 
@@ -412,11 +418,25 @@ export async function processBrickCheckout(opts: {
   }
 
   const payCard = payJson.card as
-    | { id?: string | number; last_four_digits?: string }
+    | { id?: string | number; last_four_digits?: string; tags?: string[] }
     | undefined;
+  const isPrepaid = Array.isArray(payCard?.tags) && payCard.tags.includes("prepaid");
   let cardId = payCard?.id != null ? String(payCard.id) : undefined;
   let lastFour = payCard?.last_four_digits ? String(payCard.last_four_digits) : undefined;
 
+  // 1) Tarjetas vaultables: MP suele devolver card.id. Si no, intentamos guardar el token.
+  if (customerId && !cardId && opts.card.token) {
+    const saved = await saveCardToCustomer({
+      accessToken: opts.accessToken,
+      customerId,
+      token: opts.card.token,
+    });
+    if (saved.cardId) {
+      cardId = saved.cardId;
+      lastFour = saved.lastFour ?? lastFour;
+      console.log("[mp] card vaulted post-charge", cardId);
+    }
+  }
   if (customerId && !cardId) {
     const existing = await listCustomerCards({
       accessToken: opts.accessToken,
@@ -428,22 +448,44 @@ export async function processBrickCheckout(opts: {
     }
   }
 
+  // 2) Enganche mensual automático (sin pedir “Guardar” al cliente).
+  //    Preferimos card_id; si no hay (p.ej. prepaga), reintentamos con el mismo token.
   let preapprovalId: string | undefined;
+  const subBase = {
+    accessToken: opts.accessToken,
+    userId: opts.userId,
+    email,
+    amounts: opts.amounts,
+    backUrl: opts.backUrl,
+    startNextMonth: true as const,
+    reasonSuffix: isSetup ? " (post-setup)" : " (post-self)",
+  };
   if (cardId) {
-    const sub = await createMonthlyPreapproval({
-      accessToken: opts.accessToken,
-      userId: opts.userId,
-      email,
-      amounts: opts.amounts,
-      backUrl: opts.backUrl,
-      cardId,
-      startNextMonth: true,
-      reasonSuffix: isSetup ? " (post-setup)" : " (post-self)",
-    });
+    const sub = await createMonthlyPreapproval({ ...subBase, cardId });
     if (sub.ok) preapprovalId = sub.preapprovalId;
-    else console.warn("[mp]", opts.plan, "paid but monthly sub failed", sub.detail);
-  } else {
-    console.warn("[mp]", opts.plan, "paid — sin card_id; falta enganche mensual");
+    else console.warn("[mp]", opts.plan, "preapproval card_id failed", sub.detail);
+  }
+  if (!preapprovalId && opts.card.token) {
+    const sub = await createMonthlyPreapproval({
+      ...subBase,
+      cardTokenId: opts.card.token,
+    });
+    if (sub.ok) {
+      preapprovalId = sub.preapprovalId;
+      console.log("[mp] preapproval via card_token_id", preapprovalId);
+    } else {
+      console.warn("[mp]", opts.plan, "preapproval token failed", sub.detail, {
+        isPrepaid,
+      });
+    }
+  }
+  if (!preapprovalId) {
+    console.warn(
+      "[mp]",
+      opts.plan,
+      "paid — sin suscripción automática",
+      isPrepaid ? "prepaid" : "no-card",
+    );
   }
 
   return {
