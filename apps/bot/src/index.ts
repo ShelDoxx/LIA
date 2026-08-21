@@ -31,7 +31,6 @@ import {
 import {
   createOtp,
   listUsers,
-  loginWithVerifiedEmail,
   revokeSession,
   sessionFromToken,
   upsertEntitlement,
@@ -39,7 +38,6 @@ import {
   type EntitlementStatus,
 } from "./auth.js";
 import { sendOtpEmail } from "./mail.js";
-import { verifyFirebaseIdToken } from "./firebaseVerify.js";
 
 const app = express();
 
@@ -126,39 +124,7 @@ app.post("/auth/verify-otp", (req, res) => {
     sessionToken: result.sessionToken,
     user: { id: result.user.id, email: result.user.email, name: result.user.name },
     entitlement: result.entitlement,
-  });
-});
-
-app.post("/auth/session-google", async (req, res) => {
-  const idToken = String(req.body?.idToken ?? "");
-  if (!config.firebaseWebApiKey) {
-    res.status(503).json({
-      ok: false,
-      error: "Google Auth no está habilitado en el servidor (FIREBASE_WEB_API_KEY).",
-    });
-    return;
-  }
-  if (!idToken) {
-    res.status(400).json({ ok: false, error: "idToken requerido" });
-    return;
-  }
-  const verified = await verifyFirebaseIdToken(idToken, config.firebaseWebApiKey);
-  if (!verified) {
-    res.status(401).json({ ok: false, error: "Token de Google inválido o expirado" });
-    return;
-  }
-  const name =
-    (typeof req.body?.name === "string" && req.body.name.trim()) || verified.name;
-  const result = loginWithVerifiedEmail({
-    email: verified.email,
-    name,
-    firebaseUid: verified.uid,
-  });
-  res.json({
-    ok: true,
-    sessionToken: result.sessionToken,
-    user: { id: result.user.id, email: result.user.email, name: result.user.name },
-    entitlement: result.entitlement,
+    isAdmin: config.adminEmails.includes(result.user.email),
   });
 });
 

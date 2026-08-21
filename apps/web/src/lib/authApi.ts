@@ -62,6 +62,7 @@ export async function verifyOtp(email: string, code: string, name?: string) {
     sessionToken?: string;
     user?: LiaAuthUser;
     entitlement?: LiaEntitlement;
+    isAdmin?: boolean;
   };
   if (!res.ok || !data.ok || !data.sessionToken || !data.user) {
     return { ok: false as const, error: data.error || "Código inválido" };
@@ -72,34 +73,7 @@ export async function verifyOtp(email: string, code: string, name?: string) {
     user: data.user,
     entitlement: data.entitlement,
     sessionToken: data.sessionToken,
-  };
-}
-
-export async function sessionFromGoogle(opts: {
-  idToken: string;
-  name?: string;
-}) {
-  const res = await fetch(botUrl("/auth/session-google"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(opts),
-  });
-  const data = (await res.json().catch(() => ({}))) as {
-    ok?: boolean;
-    error?: string;
-    sessionToken?: string;
-    user?: LiaAuthUser;
-    entitlement?: LiaEntitlement;
-  };
-  if (!res.ok || !data.ok || !data.sessionToken || !data.user) {
-    return { ok: false as const, error: data.error || "No se pudo crear sesión" };
-  }
-  setSessionToken(data.sessionToken);
-  return {
-    ok: true as const,
-    user: data.user,
-    entitlement: data.entitlement,
-    sessionToken: data.sessionToken,
+    isAdmin: Boolean(data.isAdmin),
   };
 }
 

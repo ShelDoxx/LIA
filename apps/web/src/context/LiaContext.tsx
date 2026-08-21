@@ -47,14 +47,10 @@ import { estudioState } from "@/data/estudio";
 import { renewPolicyDates } from "@/lib/renewPolicy";
 import { pushMetaConfigToBot, sendOutboundBatch, shouldSendWhatsApp } from "@/lib/outbound";
 import { pullPendingBotDocs } from "@/lib/botDocsSync";
-import { cloudSyncAvailable, loadStateFromCloud, saveStateToCloud } from "@/lib/cloudSync";
-import { auth, firebaseEnabled } from "@/lib/firebase";
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import {
   fetchAuthMe,
   logoutSession,
   requestOtp,
-  sessionFromGoogle,
   verifyOtp,
 } from "@/lib/authApi";
 
@@ -192,13 +188,11 @@ function slimForStorage(state: LiaState): LiaState {
 
 type LiaContextValue = {
   state: LiaState;
-  firebaseEnabled: boolean;
   signedIn: boolean;
   isAdmin: boolean;
   entitlementStatus: "none" | "trial" | "active" | "expired" | null;
   refreshEntitlement: () => Promise<void>;
   signIn: (name?: string, email?: string, plan?: "demo" | "estudio") => Promise<void>;
-  signInWithGoogle: (plan?: "demo" | "estudio") => Promise<void>;
   requestEmailOtp: (email: string, name?: string) => Promise<{ ok: boolean; error?: string; devCode?: string }>;
   verifyEmailOtp: (
     email: string,
@@ -411,9 +405,6 @@ export function LiaProvider({ children }: { children: ReactNode }) {
       }
     }
     void syncBotContext(next);
-    if (cloudSyncAvailable() && next.producer.firebaseUid) {
-      void saveStateToCloud(next);
-    }
   };
 
   useEffect(() => {
@@ -513,7 +504,6 @@ export function LiaProvider({ children }: { children: ReactNode }) {
     const currentOf = () => stateRef.current ?? state;
     return {
       state,
-      firebaseEnabled,
       signedIn,
       isAdmin,
       entitlementStatus,
@@ -593,98 +583,31 @@ export function LiaProvider({ children }: { children: ReactNode }) {
             },
           };
         }
-        const { state: afterDaily, outbound } = runDailyAutomations(next);
-        next = afterDaily;
-        if (next.bot.metaAccessToken || next.bot.metaPhoneNumberId) {
-          await pushMetaConfigToBot(next.bot);
-        }
-        next = await withWhatsAppOutbound(next, outbound);
-        next = await pullPendingBotDocs(next);
         await persist(next);
         await set(AUTH_KEY, "1");
         setEntitlementStatus(r.entitlement?.status ?? "none");
-        const me = await fetchAuthMe();
-        const admin = Boolean(me.ok && me.isAdmin);
+        const admin = Boolean(r.isAdmin);
         setIsAdmin(admin);
         setSignedIn(true);
+        if (!admin) {
+          const snapshot = next;
+          void (async () => {
+            try {
+              let bg = snapshot;
+              const { state: afterDaily, outbound } = runDailyAutomations(bg);
+              bg = afterDaily;
+              if (bg.bot.metaAccessToken || bg.bot.metaPhoneNumberId) {
+                await pushMetaConfigToBot(bg.bot);
+              }
+              bg = await withWhatsAppOutbound(bg, outbound);
+              bg = await pullPendingBotDocs(bg);
+              await persist(bg);
+            } catch (err) {
+              console.error("[lia] post-otp sync", err);
+            }
+          })();
+        }
         return { ok: true, isAdmin: admin };
-      },
-      signInWithGoogle: async (plan) => {
-        const current = currentOf();
-        const chosen = plan ?? "estudio";
-        if (!auth || !firebaseEnabled) {
-          throw new Error("Google Auth no está configurado");
-        }
-        const cred = await signInWithPopup(auth, new GoogleAuthProvider());
-        const user = cred.user;
-        if (!user.email) throw new Error("Google no devolvió email");
-        const idToken = await user.getIdToken();
-        const sess = await sessionFromGoogle({
-          idToken,
-          name: user.displayName ?? undefined,
-        });
-        if (!sess.ok) throw new Error(sess.error || "No se pudo crear sesión");
-
-        const cloud = await loadStateFromCloud(user.uid);
-        let next: LiaState;
-        if (cloud) {
-          next = mergeState(seedState(), cloud);
-          next = {
-            ...next,
-            producer: {
-              ...next.producer,
-              id: user.uid,
-              name: user.displayName ?? next.producer.name,
-              email: user.email,
-              firebaseUid: user.uid,
-              liaUserId: sess.user.id,
-              plan: chosen ?? next.producer.plan,
-            },
-          };
-        } else if (chosen === "demo") {
-          next = {
-            ...current,
-            producer: {
-              ...current.producer,
-              id: user.uid,
-              name: user.displayName ?? current.producer.name,
-              email: user.email,
-              firebaseUid: user.uid,
-              liaUserId: sess.user.id,
-              plan: "demo",
-            },
-          };
-        } else {
-          next = estudioState({
-            id: user.uid,
-            name: user.displayName ?? "Productor",
-            email: user.email,
-            firebaseUid: user.uid,
-            liaUserId: sess.user.id,
-          });
-        }
-        if (sess.entitlement?.status === "active") {
-          next = {
-            ...next,
-            producer: {
-              ...next.producer,
-              subscription: {
-                status: "active",
-                startedAt: next.producer.subscription?.startedAt || new Date().toISOString(),
-                plan: sess.entitlement.plan,
-              },
-            },
-          };
-        }
-        const { state: afterDaily, outbound } = runDailyAutomations(next);
-        next = await withWhatsAppOutbound(afterDaily, outbound);
-        next = await pullPendingBotDocs(next);
-        await persist(next);
-        await set(AUTH_KEY, "1");
-        setEntitlementStatus(sess.entitlement?.status ?? "none");
-        const me = await fetchAuthMe();
-        setIsAdmin(me.ok ? me.isAdmin : false);
-        setSignedIn(true);
       },
       signOut: async () => {
         await logoutSession();

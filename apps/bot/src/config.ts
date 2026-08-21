@@ -39,8 +39,6 @@ export const config = {
     .split(",")
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean),
-  /** API key del proyecto Firebase (para verificar idToken de Google) */
-  firebaseWebApiKey: process.env.FIREBASE_WEB_API_KEY ?? "",
   isProduction: process.env.NODE_ENV === "production",
 };
 

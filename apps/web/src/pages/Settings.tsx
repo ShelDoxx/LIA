@@ -3,7 +3,6 @@ import { useLia } from "@/context/LiaContext";
 import { CsvImporter } from "@/components/CsvImporter";
 import { MetaWizard } from "@/components/MetaWizard";
 import { Badge, Button, Card, Field, inputClass } from "@/components/ui";
-import { firebaseEnabled } from "@/lib/firebase";
 import { ALL_RAMOS, POLICY_LABEL, type LiaState } from "@/lib/types";
 import { useState } from "react";
 
@@ -197,15 +196,12 @@ export function Settings() {
         </p>
         <CsvImporter compact />
         <div className="flex items-center justify-between pt-2">
-          <p className="text-sm">Sync en la nube</p>
-          <Badge tone={firebaseEnabled ? "forest" : "gold"}>
-            {firebaseEnabled ? "Listo (Google)" : "Próximamente"}
-          </Badge>
+          <p className="text-sm">Datos de la cartera</p>
+          <Badge tone="forest">En este dispositivo</Badge>
         </div>
         <p className="text-xs text-ink-soft">
-          {firebaseEnabled
-            ? "Entrá con Google para guardar la cartera en Firestore y usarla en otro dispositivo."
-            : "Hoy la cartera vive en este dispositivo (IndexedDB). Configurá VITE_FIREBASE_* para activar sync."}
+          La cartera vive en IndexedDB de este navegador. Usá el respaldo JSON abajo para no
+          perderla si borrás datos del sitio.
         </p>
       </Card>
 

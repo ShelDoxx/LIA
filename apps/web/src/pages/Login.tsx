@@ -53,7 +53,7 @@ const FAQ = [
   },
   {
     q: "¿Mis datos quedan en la nube?",
-    a: "Por defecto viven en este dispositivo. Si conectás Google, la cartera viaja a otra PC o al celular.",
+    a: "Por defecto viven en este dispositivo (este celular o PC). Podés descargar un respaldo JSON desde Ajustes.",
   },
   {
     q: "¿Sirve sin el número del estudio conectado?",
@@ -70,7 +70,7 @@ const FAQ = [
 ] as const;
 
 export function Login() {
-  const { signIn, signInWithGoogle, firebaseEnabled, requestEmailOtp, verifyEmailOtp } = useLia();
+  const { signIn, requestEmailOtp, verifyEmailOtp } = useLia();
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -446,16 +446,6 @@ export function Login() {
                 </button>
               </div>
             </Field>
-            {firebaseEnabled && plan === "estudio" && !otpSent && (
-              <Button
-                type="button"
-                variant="ghost"
-                className="w-full py-3"
-                onClick={() => void signInWithGoogle(plan).catch((e) => setErr(String(e.message || e)))}
-              >
-                Continuar con Google
-              </Button>
-            )}
             {plan === "demo" ? (
               <Button type="submit" variant="gold" className="w-full py-3">
                 Abrir la Demo Interactiva · 60s

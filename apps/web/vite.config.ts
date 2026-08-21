@@ -52,7 +52,6 @@ export default defineConfig({
           if (!id.includes("node_modules")) return;
           if (id.includes("recharts")) return "charts";
           if (id.includes("pdf-lib")) return "pdf";
-          if (id.includes("firebase")) return "firebase";
           if (id.includes("heic2any")) return "heic";
           if (id.includes("date-fns")) return "date-fns";
           // React + react-router must stay in the same graph as UI libs — splitting
