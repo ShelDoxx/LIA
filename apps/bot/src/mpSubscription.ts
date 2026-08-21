@@ -7,6 +7,7 @@
  * - POST /preapproval · PUT /preapproval/{id} status=canceled
  * - POST /v1/customers · POST /v1/customers/{id}/cards
  */
+import { randomUUID } from "node:crypto";
 import type { BrickAmounts, BillingPlan } from "./mpBrickTypes.js";
 
 export type CardForm = {
@@ -20,13 +21,24 @@ export type CardForm = {
   };
 };
 
-export async function mpFetch(path: string, accessToken: string, init?: RequestInit) {
+export async function mpFetch(
+  path: string,
+  accessToken: string,
+  init?: RequestInit & { idempotencyKey?: string },
+) {
+  const method = (init?.method ?? "GET").toUpperCase();
+  const needsIdempotency = method === "POST" || method === "PUT" || method === "PATCH";
+  const idem =
+    init?.idempotencyKey ||
+    (needsIdempotency ? randomUUID().replace(/-/g, "").slice(0, 64) : undefined);
+  const { idempotencyKey: _drop, ...rest } = init ?? {};
   const res = await fetch(`https://api.mercadopago.com${path}`, {
-    ...init,
+    ...rest,
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
+      ...(idem ? { "X-Idempotency-Key": idem } : {}),
+      ...(rest.headers ?? {}),
     },
   });
   const text = await res.text();
@@ -314,6 +326,8 @@ export async function processBrickCheckout(opts: {
 
   const pay = await mpFetch("/v1/payments", opts.accessToken, {
     method: "POST",
+    // Una clave por intento de cobro (user + plan + token prefix) evita dobles cobros en retry.
+    idempotencyKey: `${opts.userId}:${opts.plan}:${opts.card.token.slice(0, 24)}`.slice(0, 64),
     body: JSON.stringify(paymentBody),
   });
   if (!pay.ok) {
