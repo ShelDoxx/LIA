@@ -10,6 +10,7 @@ import {
   type BrickAmounts,
   type SubscriptionPlan,
 } from "@/lib/billing";
+import { warmMercadoPago } from "@/lib/mpWarmup";
 
 type Props = {
   producerName?: string;
@@ -37,12 +38,18 @@ export function CheckoutPlans({ producerName, payerEmail, onActivate, onPaid, co
       setBrickEnabled(cfg.brickEnabled);
       setPublicKey(cfg.publicKey);
       setAmounts(cfg.amounts);
+      if (cfg.publicKey) warmMercadoPago(cfg.publicKey);
       setReady(true);
     });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  // Al pasar el mouse / foco por pagar, reforzar warmup del SDK
+  function warmOnIntent() {
+    if (publicKey) warmMercadoPago(publicKey);
+  }
 
   const hasSelf = Boolean(selfUrl);
   const hasSetup = Boolean(setupUrl);
@@ -97,6 +104,8 @@ export function CheckoutPlans({ producerName, payerEmail, onActivate, onPaid, co
           variant="ghost"
           className="mt-5 w-full py-3"
           disabled={!ready && !hasAny}
+          onMouseEnter={warmOnIntent}
+          onFocus={warmOnIntent}
           onClick={() => pick("self")}
         >
           {brickEnabled ? "Pagar Self-service" : "Elegir Self-service"}
@@ -119,6 +128,8 @@ export function CheckoutPlans({ producerName, payerEmail, onActivate, onPaid, co
           variant="gold"
           className="mt-5 w-full py-3"
           disabled={!ready && !hasAny}
+          onMouseEnter={warmOnIntent}
+          onFocus={warmOnIntent}
           onClick={() => pick("setup")}
         >
           {brickEnabled ? "Pagar Setup completo" : "Elegir Setup completo"}

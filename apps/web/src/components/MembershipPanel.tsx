@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { initMercadoPago, CardPayment } from "@mercadopago/sdk-react";
+import { CardPayment } from "@mercadopago/sdk-react";
 import { Button, Card } from "@/components/ui";
 import {
   attachMonthlyCard,
@@ -9,6 +9,7 @@ import {
   type MembershipInfo,
 } from "@/lib/membership";
 import { loadCheckoutConfigFromBot, type BrickAmounts } from "@/lib/billing";
+import { warmMercadoPago } from "@/lib/mpWarmup";
 import { useLia } from "@/context/LiaContext";
 
 export function MembershipPanel() {
@@ -35,7 +36,7 @@ export function MembershipPanel() {
     void loadCheckoutConfigFromBot().then((cfg) => {
       setPublicKey(cfg.publicKey);
       setAmounts(cfg.amounts);
-      if (cfg.publicKey) initMercadoPago(cfg.publicKey, { locale: "es-AR" });
+      if (cfg.publicKey) warmMercadoPago(cfg.publicKey);
     });
   }, []);
 

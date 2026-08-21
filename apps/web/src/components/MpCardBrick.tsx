@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { initMercadoPago, CardPayment } from "@mercadopago/sdk-react";
 import type { SubscriptionPlan } from "@/lib/billing";
 import { processBrickCardPayment, type BrickAmounts } from "@/lib/billing";
+import { warmMercadoPago } from "@/lib/mpWarmup";
 import { Button } from "@/components/ui";
 
 type Props = {
@@ -14,18 +15,20 @@ type Props = {
 };
 
 export function MpCardBrick({ plan, publicKey, amounts, payerEmail, onSuccess, onCancel }: Props) {
-  const [ready, setReady] = useState(false);
+  const [sdkReady, setSdkReady] = useState(false);
+  const [brickReady, setBrickReady] = useState(false);
   const [err, setErr] = useState("");
   const amount = plan === "setup" ? amounts.arsSetup : amounts.arsSelf;
 
   useEffect(() => {
     if (!publicKey) return;
+    warmMercadoPago(publicKey);
     initMercadoPago(publicKey, { locale: "es-AR" });
-    setReady(true);
+    setSdkReady(true);
   }, [publicKey]);
 
-  if (!ready || !publicKey) {
-    return <p className="text-sm text-ink-soft">Cargando formulario de pago…</p>;
+  if (!sdkReady || !publicKey) {
+    return <p className="text-sm text-ink-soft">Preparando Mercado Pago…</p>;
   }
 
   return (
@@ -55,32 +58,39 @@ export function MpCardBrick({ plan, publicKey, amounts, payerEmail, onSuccess, o
       </div>
 
       {err ? <p className="text-sm text-danger">{err}</p> : null}
+      {!brickReady ? (
+        <p className="text-sm text-ink-soft">Cargando formulario de tarjeta…</p>
+      ) : null}
 
-      <CardPayment
-        initialization={{
-          amount,
-          payer: payerEmail ? { email: payerEmail } : undefined,
-        }}
-        customization={{
-          visual: { style: { theme: "default" } },
-        }}
-        onSubmit={async (formData) => {
-          setErr("");
-          const result = await processBrickCardPayment(plan, formData);
-          if (!result.ok) {
-            setErr(result.error || "No se pudo procesar el pago");
-            throw new Error(result.error || "payment_failed");
-          }
-          onSuccess({
-            plan: result.plan ?? plan,
-            setupMeetPending: result.setupMeetPending,
-          });
-        }}
-        onError={(error) => {
-          console.error("[mp brick]", error);
-          setErr("Hubo un problema con el formulario de tarjeta.");
-        }}
-      />
+      <div className={brickReady ? undefined : "min-h-[280px] opacity-60"}>
+        <CardPayment
+          initialization={{
+            amount,
+            payer: payerEmail ? { email: payerEmail } : undefined,
+          }}
+          customization={{
+            visual: { style: { theme: "default" } },
+          }}
+          onReady={() => setBrickReady(true)}
+          onSubmit={async (formData) => {
+            setErr("");
+            const result = await processBrickCardPayment(plan, formData);
+            if (!result.ok) {
+              setErr(result.error || "No se pudo procesar el pago");
+              throw new Error(result.error || "payment_failed");
+            }
+            onSuccess({
+              plan: result.plan ?? plan,
+              setupMeetPending: result.setupMeetPending,
+            });
+          }}
+          onError={(error) => {
+            console.error("[mp brick]", error);
+            setErr("Hubo un problema con el formulario de tarjeta.");
+            setBrickReady(true);
+          }}
+        />
+      </div>
 
       <Button variant="ghost" className="w-full" onClick={onCancel}>
         Volver a los planes
