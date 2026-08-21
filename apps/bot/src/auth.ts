@@ -24,8 +24,10 @@ export type Entitlement = {
   membershipStartedAt?: string;
   /** Fin del período pagado (ISO). Al vencer → expired. */
   periodEndsAt?: string;
-  /** Debe renovar / cargar tarjeta antes de periodEndsAt */
+  /** Debe renovar / re-pagar (gracia post-cancel o período por vencer sin cobro). */
   renewalRequired?: boolean;
+  /** Pagó el mes pero falta enganchar tarjeta para el cobro automático siguiente. */
+  needsCardForMonthly?: boolean;
   updatedAt: string;
 };
 

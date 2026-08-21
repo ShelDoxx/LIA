@@ -193,10 +193,12 @@ type LiaContextValue = {
   entitlementStatus: "none" | "trial" | "active" | "expired" | null;
   entitlement: {
     renewalRequired?: boolean;
+    needsCardForMonthly?: boolean;
     periodEndsAt?: string;
     daysLeft?: number | null;
     graceLabel?: string | null;
     plan?: "self" | "setup";
+    mpPaymentId?: string;
   } | null;
   refreshEntitlement: () => Promise<void>;
   signIn: (name?: string, email?: string, plan?: "demo" | "estudio") => Promise<void>;
@@ -283,10 +285,12 @@ export function LiaProvider({ children }: { children: ReactNode }) {
   >(null);
   const [entitlementMeta, setEntitlementMeta] = useState<{
     renewalRequired?: boolean;
+    needsCardForMonthly?: boolean;
     periodEndsAt?: string;
     daysLeft?: number | null;
     graceLabel?: string | null;
     plan?: "self" | "setup";
+    mpPaymentId?: string;
   } | null>(null);
   const [ready, setReady] = useState(false);
   const [isProcessingMedia, setIsProcessingMedia] = useState(false);
@@ -313,10 +317,12 @@ export function LiaProvider({ children }: { children: ReactNode }) {
               me.entitlement
                 ? {
                     renewalRequired: me.entitlement.renewalRequired,
+                    needsCardForMonthly: me.entitlement.needsCardForMonthly,
                     periodEndsAt: me.entitlement.periodEndsAt,
                     daysLeft: me.entitlement.daysLeft,
                     graceLabel: me.entitlement.graceLabel,
                     plan: me.entitlement.plan,
+                    mpPaymentId: me.entitlement.mpPaymentId,
                   }
                 : null,
             );
@@ -548,10 +554,12 @@ export function LiaProvider({ children }: { children: ReactNode }) {
           me.entitlement
             ? {
                 renewalRequired: me.entitlement.renewalRequired,
+                needsCardForMonthly: me.entitlement.needsCardForMonthly,
                 periodEndsAt: me.entitlement.periodEndsAt,
                 daysLeft: me.entitlement.daysLeft,
                 graceLabel: me.entitlement.graceLabel,
                 plan: me.entitlement.plan,
+                mpPaymentId: me.entitlement.mpPaymentId,
               }
             : null,
         );
@@ -630,10 +638,12 @@ export function LiaProvider({ children }: { children: ReactNode }) {
           r.entitlement
             ? {
                 renewalRequired: r.entitlement.renewalRequired,
+                needsCardForMonthly: r.entitlement.needsCardForMonthly,
                 periodEndsAt: r.entitlement.periodEndsAt,
                 daysLeft: r.entitlement.daysLeft,
                 graceLabel: r.entitlement.graceLabel,
                 plan: r.entitlement.plan,
+                mpPaymentId: r.entitlement.mpPaymentId,
               }
             : null,
         );

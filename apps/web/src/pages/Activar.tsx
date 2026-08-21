@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useLia } from "@/context/LiaContext";
-import { Button, Card, Field, inputClass } from "@/components/ui";
+import { Button, Card } from "@/components/ui";
 import { CheckoutPlans } from "@/components/CheckoutPlans";
 import {
   activateSubscription,
@@ -38,9 +38,7 @@ export function Activar() {
   const [params] = useSearchParams();
   const sub = state.producer.subscription;
   const meetPending = sub?.status === "active" && sub.setupMeetPending;
-  const [pendingPlan, setPendingPlan] = useState<SubscriptionPlan | null>(() => readPendingPlan());
-  const [operationId, setOperationId] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [, setPendingPlan] = useState<SubscriptionPlan | null>(() => readPendingPlan());
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const autoTried = useRef(false);
@@ -76,42 +74,24 @@ export function Activar() {
     setErr("");
   }
 
-  async function tryAutoActivate(opts?: { op?: string; plan?: SubscriptionPlan | null }) {
-    if (sub?.status === "active") return true;
-    const plan = opts?.plan ?? pendingPlan ?? readPendingPlan() ?? "self";
-    const op = (opts?.op || operationId).trim();
-    if (!op) {
-      setErr("Pegá el número de operación de Mercado Pago (un pago = una sola cuenta).");
-      return false;
-    }
-    setBusy(true);
-    setErr("");
-    setMsg("Verificando pago con Mercado Pago…");
-    const byOp = await confirmMercadoPagoPayment(op, plan);
-    setBusy(false);
-    if (byOp.ok) {
-      applyActivation(byOp.plan ?? plan, byOp.setupMeetPending);
-      return true;
-    }
-    setMsg("");
-    setErr(byOp.error || "No se pudo verificar ese número de operación.");
-    return false;
-  }
-
-  async function confirmPaid() {
-    await tryAutoActivate({ op: operationId, plan: pendingPlan ?? "self" });
-  }
-
   useEffect(() => {
     if (autoTried.current || sub?.status === "active") return;
     const planParam = params.get("plan");
     const plan: SubscriptionPlan | null =
       planParam === "setup" || planParam === "self" ? planParam : readPendingPlan();
     const op = extractMpReturnOperationId(params);
-    if (op) setOperationId(op);
     if (!op) return;
     autoTried.current = true;
-    void tryAutoActivate({ op, plan });
+    void (async () => {
+      setMsg("Verificando pago con Mercado Pago…");
+      const byOp = await confirmMercadoPagoPayment(op, plan ?? "self");
+      if (byOp.ok) {
+        await applyActivation(byOp.plan ?? plan ?? "self", byOp.setupMeetPending);
+      } else {
+        setMsg("");
+        setErr(byOp.error || "No se pudo verificar el retorno de Mercado Pago.");
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -141,8 +121,13 @@ export function Activar() {
       setErr("Con Mercado Pago activo no se puede activar sin verificar el pago.");
       return;
     }
-    applyActivation(plan);
+    void applyActivation(plan);
   }
+
+  const showRenewalUrgency =
+    entitlement?.renewalRequired &&
+    entitlement.graceLabel &&
+    (entitlementStatus === "active" || entitlementStatus === "expired");
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -158,21 +143,30 @@ export function Activar() {
       {msg ? <p className="text-sm text-gold">{msg}</p> : null}
       {err ? <p className="text-sm text-danger">{err}</p> : null}
 
-      {entitlementStatus === "expired" ||
-      (entitlement?.renewalRequired && entitlementStatus !== "active") ? (
+      {entitlementStatus === "expired" ? (
         <Card className="border-danger/40 bg-red-50 p-5">
           <p className="font-serif text-xl text-forest">Membresía vencida</p>
           <p className="mt-2 text-sm text-ink-soft">
-            El período del Setup terminó y no quedó cobro mensual. Pagá Self USD 49/mes para
-            reactivar el escritorio.
+            El período terminó. Pagá de nuevo Self o Setup para reactivar el escritorio.
           </p>
         </Card>
-      ) : entitlement?.renewalRequired && entitlement.graceLabel ? (
+      ) : showRenewalUrgency ? (
         <Card className="border-danger/40 bg-red-50 p-5">
-          <p className="font-serif text-xl text-forest">Renovación pendiente</p>
+          <p className="font-serif text-xl text-forest">Suscripción cancelada</p>
           <p className="mt-2 text-sm text-ink-soft">
-            Quedan <strong>{entitlement.graceLabel}</strong> de acceso. Configurá el cobro mensual o
-            renová el plan para no perder el escritorio.
+            Seguis con acceso hasta el fin del período ya pago (
+            <strong>{entitlement!.graceLabel}</strong>). Después hay que volver a activar.
+          </p>
+        </Card>
+      ) : entitlement?.needsCardForMonthly && entitlementStatus === "active" ? (
+        <Card className="border-gold/40 bg-gold/5 p-5">
+          <p className="font-serif text-xl text-forest">Mes pago · falta cobro automático</p>
+          <p className="mt-2 text-sm text-ink-soft">
+            Tu pago ya está acreditado. Para que el mes siguiente se cobre solo, guardá la tarjeta en{" "}
+            <Link to="/ajustes" className="underline">
+              Ajustes → Membresía
+            </Link>
+            .
           </p>
         </Card>
       ) : null}
@@ -190,9 +184,9 @@ export function Activar() {
             Ir al escritorio
           </Link>
         </Card>
-      ) : sub?.status === "active" &&
-        entitlementStatus === "active" &&
-        !entitlement?.renewalRequired ? (
+      ) : entitlementStatus === "active" &&
+        !entitlement?.renewalRequired &&
+        (sub?.status === "active" || Boolean(entitlement?.mpPaymentId)) ? (
         <Card className="p-6">
           <p className="font-serif text-xl text-forest">Ya tenés el plan activo.</p>
           <Link to="/">
@@ -200,42 +194,17 @@ export function Activar() {
           </Link>
         </Card>
       ) : (
-        <>
-          <CheckoutPlans
-            producerName={state.producer.name}
-            payerEmail={state.producer.email}
-            onActivate={onDemoActivate}
-            onPaid={(r) =>
-              applyActivation(r.plan, r.setupMeetPending, {
-                amount: r.amount,
-                mpPaymentId: r.mpPaymentId,
-              })
-            }
-          />
-          <Card className="border-line p-5">
-            <p className="font-serif text-lg text-forest">¿Ya pagaste por otro lado?</p>
-            <p className="mt-2 text-sm text-ink-soft">
-              Pegá el número de <strong>Operación</strong> de Mercado Pago para vincular el pago a
-              esta cuenta.
-            </p>
-            <div className="mt-4">
-              <Field label="Número de operación MP">
-                <input
-                  className={inputClass}
-                  value={operationId}
-                  onChange={(e) => setOperationId(e.target.value)}
-                  placeholder="174778901606"
-                  inputMode="numeric"
-                />
-              </Field>
-            </div>
-            <div className="mt-4">
-              <Button variant="gold" disabled={busy} onClick={() => void confirmPaid()}>
-                {busy ? "Verificando con Mercado Pago…" : "Verificar pago y activar"}
-              </Button>
-            </div>
-          </Card>
-        </>
+        <CheckoutPlans
+          producerName={state.producer.name}
+          payerEmail={state.producer.email}
+          onActivate={onDemoActivate}
+          onPaid={(r) =>
+            applyActivation(r.plan, r.setupMeetPending, {
+              amount: r.amount,
+              mpPaymentId: r.mpPaymentId,
+            })
+          }
+        />
       )}
     </div>
   );

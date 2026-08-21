@@ -68,7 +68,9 @@ export function MembershipPanel() {
     );
   }
 
-  const needsCard = Boolean(info?.renewalRequired || entitlement?.renewalRequired) && !info?.mpPreapprovalId;
+  const needsCard =
+    Boolean(info?.needsCardForMonthly || entitlement?.needsCardForMonthly) &&
+    !info?.mpPreapprovalId;
   const hasSub = Boolean(info?.mpPreapprovalId);
 
   return (
@@ -121,7 +123,12 @@ export function MembershipPanel() {
           ) : null}
           {info.renewalRequired && info.graceLabel ? (
             <li className="text-danger">
-              Renovación pendiente · quedan {info.graceLabel}
+              Suscripción cancelada · acceso hasta {info.graceLabel}
+            </li>
+          ) : null}
+          {info.needsCardForMonthly && !info.mpPreapprovalId ? (
+            <li className="text-forest">
+              Mes pago · falta guardar tarjeta para el cobro automático del mes siguiente.
             </li>
           ) : null}
         </ul>
@@ -143,9 +150,9 @@ export function MembershipPanel() {
             {busy ? "Cancelando…" : "Cancelar suscripción"}
           </Button>
         ) : null}
-        {(needsCard || info?.renewalRequired) && !showAttach ? (
+        {(needsCard || info?.needsCardForMonthly) && !showAttach ? (
           <Button variant="gold" onClick={() => setShowAttach(true)}>
-            Guardar tarjeta para cobro mensual
+            Guardar tarjeta para cobro automático
           </Button>
         ) : null}
         <Link to="/activar" className="inline-flex items-center text-sm text-forest underline">

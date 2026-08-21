@@ -463,7 +463,8 @@ app.post("/mercadopago/webhook", async (req, res) => {
             mpPaymentId: act.mpPaymentId ?? prev?.mpPaymentId,
             mpPreapprovalId: act.mpPreapprovalId ?? prev?.mpPreapprovalId,
             renewalRequired: false,
-            clearPeriodEndsAt: true,
+            needsCardForMonthly: act.mpPreapprovalId ? false : prev?.needsCardForMonthly,
+            ...(act.mpPreapprovalId ? { clearPeriodEndsAt: true } : {}),
           });
           console.log("[mp] webhook → entitlement", userId, act.plan, act.mpPaymentId);
         }
@@ -594,9 +595,9 @@ app.post("/billing/process-card", async (req, res) => {
       });
       return;
     }
-    const renewalRequired =
-      Boolean(result.needsCardForMonthly) || (result.plan === "setup" && !result.mpPreapprovalId);
-    const periodEndsAt = renewalRequired
+    const missingMonthlySub = Boolean(result.needsCardForMonthly) || !result.mpPreapprovalId;
+    // Período pagado (~30d) si no hay suscripción automática; NO es "renovación urgente".
+    const periodEndsAt = missingMonthlySub
       ? computePeriodEndsAt({
           periodDays: config.billingPeriodDays,
           testGraceMinutes: config.billingTestGraceMinutes,
@@ -609,9 +610,11 @@ app.post("/billing/process-card", async (req, res) => {
       mpPreapprovalId: result.mpPreapprovalId,
       mpCustomerId: result.mpCustomerId,
       cardLastFour: result.cardLastFour,
-      ...(renewalRequired
-        ? { periodEndsAt, renewalRequired: true }
-        : { renewalRequired: false, clearPeriodEndsAt: true }),
+      renewalRequired: false,
+      needsCardForMonthly: missingMonthlySub,
+      ...(missingMonthlySub
+        ? { periodEndsAt }
+        : { clearPeriodEndsAt: true }),
     });
     console.log(
       "[billing] brick → entitlement",
@@ -619,7 +622,7 @@ app.post("/billing/process-card", async (req, res) => {
       result.plan,
       result.mpPaymentId,
       result.amount,
-      renewalRequired ? `renewal_grace_until=${periodEndsAt}` : "ok",
+      missingMonthlySub ? `needs_card period=${periodEndsAt}` : "subscribed_ok",
     );
     const entitlement = toEntitlementView(
       listUsers().find((u) => u.id === sess.user.id)!.entitlement,
@@ -632,9 +635,9 @@ app.post("/billing/process-card", async (req, res) => {
       mpPaymentId: result.mpPaymentId,
       mpPreapprovalId: result.mpPreapprovalId,
       detail: result.detail,
-      renewalRequired,
+      renewalRequired: false,
+      needsCardForMonthly: missingMonthlySub,
       periodEndsAt,
-      needsCardForMonthly: result.needsCardForMonthly,
       entitlement,
     });
   } catch (err) {
@@ -681,6 +684,7 @@ app.post("/billing/attach-card", async (req, res) => {
       mpCustomerId: result.mpCustomerId,
       cardLastFour: result.cardLastFour,
       renewalRequired: false,
+      needsCardForMonthly: false,
       clearPeriodEndsAt: true,
     });
     res.json({
@@ -748,6 +752,7 @@ app.get("/billing/subscription", async (req, res) => {
       status: ent.status,
       plan: ent.plan,
       renewalRequired: Boolean(ent.renewalRequired),
+      needsCardForMonthly: Boolean(ent.needsCardForMonthly),
       periodEndsAt: ent.periodEndsAt,
       daysLeft: ent.daysLeft,
       graceLabel: ent.graceLabel,

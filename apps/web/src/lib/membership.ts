@@ -5,6 +5,7 @@ export type MembershipInfo = {
   status: string;
   plan?: "self" | "setup";
   renewalRequired?: boolean;
+  needsCardForMonthly?: boolean;
   periodEndsAt?: string;
   daysLeft?: number | null;
   graceLabel?: string | null;

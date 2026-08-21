@@ -8,6 +8,8 @@ export type LiaEntitlement = {
   plan?: "self" | "setup";
   periodEndsAt?: string;
   renewalRequired?: boolean;
+  needsCardForMonthly?: boolean;
+  mpPaymentId?: string;
   daysLeft?: number | null;
   graceLabel?: string | null;
   updatedAt?: string;

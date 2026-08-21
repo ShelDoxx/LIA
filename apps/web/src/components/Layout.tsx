@@ -328,11 +328,19 @@ export function Layout() {
         entitlementStatus === "active" &&
         entitlement.graceLabel ? (
           <div className="border-b border-danger/40 bg-red-50 px-4 py-2 text-center text-sm text-danger md:px-8">
-            Renová tu membresía: quedan <strong>{entitlement.graceLabel}</strong> de acceso. Si no
-            configurás el cobro mensual, el escritorio se bloquea.
+            Cancelaste la suscripción. Quedan <strong>{entitlement.graceLabel}</strong> de acceso ya
+            pago.
             <Link to="/activar" className="ml-2 font-medium underline">
-              Renovar ahora
+              Ver planes
             </Link>
+          </div>
+        ) : entitlement?.needsCardForMonthly && entitlementStatus === "active" ? (
+          <div className="border-b border-gold/40 bg-gold/10 px-4 py-2 text-center text-sm text-forest md:px-8">
+            Tu mes está pago. Para renovar automático el próximo, guardá la tarjeta en{" "}
+            <Link to="/ajustes" className="font-medium underline">
+              Membresía
+            </Link>
+            .
           </div>
         ) : null}
         {state.producer.plan === "demo" ? (
