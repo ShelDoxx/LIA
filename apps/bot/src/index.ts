@@ -469,8 +469,19 @@ app.post("/mercadopago/webhook", async (req, res) => {
           console.log("[mp] webhook → entitlement", userId, act.plan, act.mpPaymentId);
         }
       } else if (act.status === "cancelled") {
-        // Gracia solo si hubo cobro real. Cancelar preapproval huérfano NO regala acceso.
-        if (!prev?.mpPaymentId) {
+        // Chargeback / refund → cortar acceso. Cancelación de usuario → gracia.
+        if (act.revokeAccess) {
+          patchEntitlement(userId, {
+            status: "expired",
+            plan: prev?.plan ?? act.plan,
+            mpPaymentId: prev?.mpPaymentId ?? act.mpPaymentId,
+            mpPreapprovalId: act.mpPreapprovalId ?? prev?.mpPreapprovalId,
+            clearPeriodEndsAt: true,
+            renewalRequired: false,
+            needsCardForMonthly: false,
+          });
+          console.log("[mp] webhook → revocado (refund/chargeback)", userId);
+        } else if (!prev?.mpPaymentId) {
           console.log("[mp] cancel ignorado — sin cobro previo", userId, act.mpPreapprovalId);
           if (prev?.status === "active") {
             patchEntitlement(userId, {
@@ -503,6 +514,7 @@ app.post("/mercadopago/webhook", async (req, res) => {
             mpPreapprovalId: act.mpPreapprovalId ?? prev?.mpPreapprovalId,
             periodEndsAt,
             renewalRequired: true,
+            needsCardForMonthly: false,
           });
           console.log("[mp] webhook → renewal grace", userId, periodEndsAt);
         }
@@ -657,6 +669,16 @@ app.post("/billing/attach-card", async (req, res) => {
     res.status(503).json({ ok: false, error: "Mercado Pago no configurado" });
     return;
   }
+  const prev = listUsers().find((u) => u.id === sess.user.id)?.entitlement;
+  // No regalar acceso: solo quien ya pagó y le faltó el engache mensual.
+  if (prev?.status !== "active" || !prev.mpPaymentId || !prev.needsCardForMonthly) {
+    res.status(403).json({
+      ok: false,
+      error:
+        "Solo podés vincular tarjeta si ya tenés un mes pago y falta la renovación automática.",
+    });
+    return;
+  }
   const amounts = brickAmounts();
   try {
     const result = await attachMonthlyWithCard({
@@ -678,7 +700,6 @@ app.post("/billing/attach-card", async (req, res) => {
       res.status(400).json({ ok: false, error: result.detail || "No se pudo guardar la tarjeta" });
       return;
     }
-    // Importante: este endpoint NO crea /v1/payments — solo vault + preapproval mes siguiente.
     console.log(
       "[billing] attach-card (sin cobro)",
       sess.user.email,
@@ -687,6 +708,8 @@ app.post("/billing/attach-card", async (req, res) => {
     );
     patchEntitlement(sess.user.id, {
       status: "active",
+      plan: prev.plan,
+      mpPaymentId: prev.mpPaymentId,
       mpPreapprovalId: result.mpPreapprovalId,
       mpCustomerId: result.mpCustomerId,
       cardLastFour: result.cardLastFour,

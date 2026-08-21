@@ -59,6 +59,7 @@ function PaidGuard({ children }: { children: React.ReactNode }) {
   if (isAdmin && entitlementStatus !== "expired") return children;
   if (entitlementStatus === "active" || entitlementStatus === "trial") return children;
   if (path === "/activar" || path.startsWith("/activar")) return children;
+  if (path === "/suscripcion" || path.startsWith("/suscripcion")) return children;
   return <Navigate to="/activar" replace />;
 }
 

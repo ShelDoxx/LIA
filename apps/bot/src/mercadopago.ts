@@ -58,6 +58,8 @@ export type BillingActivation = {
   amount?: number;
   currency?: string;
   setupMeetPending: boolean;
+  /** Refund / chargeback → revocar acceso (no gracia). */
+  revokeAccess?: boolean;
   createdAt: string;
   updatedAt: string;
   rawType?: string;
@@ -79,8 +81,7 @@ function upsert(next: BillingActivation) {
     (a) =>
       a.id === next.id ||
       (next.mpPaymentId && a.mpPaymentId === next.mpPaymentId) ||
-      (next.mpPreapprovalId && a.mpPreapprovalId === next.mpPreapprovalId) ||
-      (next.externalReference && a.externalReference === next.externalReference),
+      (next.mpPreapprovalId && a.mpPreapprovalId === next.mpPreapprovalId),
   );
   if (i >= 0) store.activations[i] = { ...store.activations[i], ...next, updatedAt: new Date().toISOString() };
   else store.activations.unshift(next);
@@ -372,10 +373,15 @@ export async function handleMercadoPagoNotification(opts: {
       `${data.external_reference ?? ""} ${desc} ${data.metadata?.lia_plan ?? ""}`,
     );
     let status: BillingActivation["status"] = "pending";
+    let revokeAccess = false;
     if (isCardValidation) {
       console.log("[mp] payment ignorado (validación/monto)", data.id ?? id, amount, op || desc);
     } else if (isPaymentApproved(data.status)) status = "active";
-    else if (isDeadPaymentStatus(data.status)) status = "cancelled";
+    else if (isDeadPaymentStatus(data.status)) {
+      status = "cancelled";
+      const dead = (data.status ?? "").toLowerCase();
+      revokeAccess = dead === "refunded" || dead === "charged_back";
+    }
     const activation: BillingActivation = {
       id: crypto.randomUUID(),
       plan,
@@ -386,6 +392,7 @@ export async function handleMercadoPagoNotification(opts: {
       amount,
       currency: data.currency_id,
       setupMeetPending: plan === "setup" && status === "active",
+      revokeAccess: revokeAccess || undefined,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       rawType: topic,

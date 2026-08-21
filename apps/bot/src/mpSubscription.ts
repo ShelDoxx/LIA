@@ -9,7 +9,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { BrickAmounts, BillingPlan } from "./mpBrickTypes.js";
-
+import { getEntitlement } from "./auth.js";
 export type CardForm = {
   token: string;
   payment_method_id: string;
@@ -312,6 +312,8 @@ export async function processBrickCheckout(opts: {
     await cancelOrphanPreapprovalsForUser({
       accessToken: opts.accessToken,
       userId: opts.userId,
+      // Nunca cancelar la suscripción viva del usuario.
+      keepId: getEntitlement(opts.userId).mpPreapprovalId,
     });
   } catch (err) {
     console.warn("[mp] orphan cleanup failed", err);

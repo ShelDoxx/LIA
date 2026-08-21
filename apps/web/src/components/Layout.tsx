@@ -36,11 +36,11 @@ const primaryLinks: NavItem[] = [
   { to: "/clientes", label: "Clientes", icon: Users },
   { to: "/whatsapp", label: "WhatsApp", icon: MessageCircle },
   { to: "/cobranzas", label: "Cobranzas", icon: Banknote },
-  { to: "/vencimientos", label: "Renovar", icon: CalendarClock },
-  { to: "/suscripcion", label: "Suscripción", icon: CreditCard },
 ];
 
 const moreLinks: NavItem[] = [
+  { to: "/vencimientos", label: "Renovar", icon: CalendarClock },
+  { to: "/suscripcion", label: "Suscripción", icon: CreditCard },
   { to: "/polizas", label: "Pólizas", icon: FileText },
   { to: "/radar", label: "Radar", icon: Radar },
   { to: "/cotizar", label: "Cotizar", icon: ClipboardList },
