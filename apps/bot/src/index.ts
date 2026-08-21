@@ -678,6 +678,13 @@ app.post("/billing/attach-card", async (req, res) => {
       res.status(400).json({ ok: false, error: result.detail || "No se pudo guardar la tarjeta" });
       return;
     }
+    // Importante: este endpoint NO crea /v1/payments — solo vault + preapproval mes siguiente.
+    console.log(
+      "[billing] attach-card (sin cobro)",
+      sess.user.email,
+      result.mpPreapprovalId,
+      result.cardLastFour,
+    );
     patchEntitlement(sess.user.id, {
       status: "active",
       mpPreapprovalId: result.mpPreapprovalId,

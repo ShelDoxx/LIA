@@ -20,6 +20,7 @@ export function MembershipPanel() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [showAttach, setShowAttach] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [publicKey, setPublicKey] = useState("");
   const [amounts, setAmounts] = useState<BrickAmounts | null>(null);
 
@@ -128,8 +129,7 @@ export function MembershipPanel() {
           ) : null}
           {info.needsCardForMonthly && !info.mpPreapprovalId ? (
             <li className="text-forest">
-              Mes pago · MP no enganchó el cobro automático (suele pasar con prepagas). Guardá una
-              crédito/débito abajo para el mes siguiente.
+              Mes ya pago · falta enganchar tarjeta para que el próximo mes se cobre solo.
             </li>
           ) : null}
         </ul>
@@ -153,7 +153,7 @@ export function MembershipPanel() {
         ) : null}
         {(needsCard || info?.needsCardForMonthly) && !showAttach ? (
           <Button variant="gold" onClick={() => setShowAttach(true)}>
-            Guardar tarjeta para cobro automático
+            Guardar tarjeta (sin cobrar)
           </Button>
         ) : null}
         <Link to="/activar" className="inline-flex items-center text-sm text-forest underline">
@@ -162,33 +162,57 @@ export function MembershipPanel() {
       </div>
 
       {showAttach && publicKey && amounts ? (
-        <div className="rounded-xl border border-line bg-cream/40 p-4">
-          <p className="mb-3 text-sm text-ink-soft">
-            Se guarda en Mercado Pago y se programa el cobro de USD {amounts.usdSelf}/mes (
-            {amounts.arsSelf.toLocaleString("es-AR")} ARS) a partir del mes siguiente.
+        <div className="space-y-3 rounded-xl border border-gold/40 bg-gold/5 p-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-gold">Sin cobro ahora</p>
+          <p className="font-serif text-xl text-forest">Solo guardamos la tarjeta</p>
+          <p className="text-sm text-ink-soft">
+            No se debita nada hoy. El próximo cobro automático será de{" "}
+            <strong>
+              {amounts.arsSelf.toLocaleString("es-AR")} ARS
+            </strong>{" "}
+            (USD {amounts.usdSelf}/mes) cuando venza el período ya pago.
           </p>
+          {saving ? (
+            <p className="text-sm text-ink-soft">Guardando en Mercado Pago…</p>
+          ) : null}
           <CardPayment
             initialization={{ amount: amounts.arsSelf }}
+            customization={{
+              visual: {
+                style: { theme: "default" },
+                texts: {
+                  formTitle: "Tarjeta para renovación",
+                  formSubmit: "Guardar tarjeta · sin cobrar",
+                  installmentsSectionTitle: "Cuotas",
+                  selectInstallments: "1",
+                },
+              } as Record<string, unknown>,
+            }}
             onSubmit={async (formData) => {
               setErr("");
-              const r = await attachMonthlyCard(formData);
-              if (!r.ok) {
-                setErr(r.error || "No se pudo guardar");
-                throw new Error(r.error || "fail");
+              setSaving(true);
+              try {
+                const r = await attachMonthlyCard(formData);
+                if (!r.ok) {
+                  setErr(r.error || "No se pudo guardar la tarjeta");
+                  throw new Error(r.error || "fail");
+                }
+                setMsg(
+                  r.cardLastFour
+                    ? `Listo. Tarjeta •••• ${r.cardLastFour} guardada. No hubo cobro ahora; el próximo mes se debita solo.`
+                    : "Listo. Tarjeta guardada para el cobro automático. No hubo cobro ahora.",
+                );
+                setShowAttach(false);
+                await refreshEntitlement();
+                await reload();
+              } finally {
+                setSaving(false);
               }
-              setMsg(
-                r.cardLastFour
-                  ? `Tarjeta •••• ${r.cardLastFour} guardada. Cobro mensual enganchado.`
-                  : "Cobro mensual enganchado.",
-              );
-              setShowAttach(false);
-              await refreshEntitlement();
-              await reload();
             }}
             onError={() => setErr("Error en el formulario de tarjeta")}
           />
-          <Button variant="ghost" className="mt-2 w-full" onClick={() => setShowAttach(false)}>
-            Cerrar
+          <Button variant="ghost" className="w-full" onClick={() => setShowAttach(false)}>
+            Cancelar
           </Button>
         </div>
       ) : null}
